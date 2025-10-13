@@ -1,0 +1,15 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+go.work
+/bin/
+.vscode/
+.DS_Store
+Thumbs.db
+*.db
+output/
+logs/
+
