@@ -48,7 +48,8 @@ type Fetcher struct {
 
 func NewFetcher(cfg *Config) *Fetcher {
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy:             http.ProxyFromEnvironment,
+		ForceAttemptHTTP2: true, // custom transports disable h2 by default
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,

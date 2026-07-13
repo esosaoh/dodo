@@ -2,9 +2,10 @@ package main
 
 import "sync"
 
-// hostHealth is a per-host circuit breaker: after limit consecutive
-// connect-level failures, the host's remaining links inherit the failure
-// verdict instead of burning a timeout each.
+// hostHealth holds two per-host circuit breakers: one for hosts that stopped
+// answering (DNS/refused/timeout), one for hosts that keep refusing us
+// (403/999-style bot walls). Either way, once tripped the host's remaining
+// links inherit a verdict instead of costing a request each.
 type hostHealth struct {
 	mu    sync.Mutex
 	hosts map[string]*hostState
@@ -12,9 +13,10 @@ type hostHealth struct {
 }
 
 type hostState struct {
-	consecFails int
-	tripped     bool
-	verdict     Verdict
+	consecFails   int
+	consecBlocked int
+	tripped       bool
+	verdict       Verdict
 }
 
 func newHostHealth(limit int) *hostHealth {
@@ -34,8 +36,6 @@ func (h *hostHealth) trippedVerdict(host string) (Verdict, bool) {
 	return st.verdict, true
 }
 
-// record notes one outcome; any HTTP response proves the host reachable and
-// resets the streak.
 func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 	if h.limit <= 0 {
 		return
@@ -47,15 +47,35 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 		st = &hostState{}
 		h.hosts[host] = st
 	}
-	if !connectFailed {
+
+	switch {
+	case connectFailed:
+		// a connect failure doesn't reset the blocked streak: the host still
+		// isn't serving us
+		st.consecFails++
+	case v.Class == ClassBlocked && v.Retryable:
+		// 429s are neutral: they neither build nor clear the blocked streak,
+		// and they get their retry rounds
 		st.consecFails = 0
+	case v.Class == ClassBlocked:
+		st.consecBlocked++
+		st.consecFails = 0
+	default:
+		st.consecFails = 0
+		st.consecBlocked = 0
+	}
+
+	if st.tripped {
 		return
 	}
-	st.consecFails++
-	if st.consecFails >= h.limit && !st.tripped {
+	switch {
+	case st.consecFails >= h.limit:
 		st.tripped = true
 		v = FinalizeVerdict(v, 3)
 		v.Reason = "host_unreachable"
 		st.verdict = v
+	case st.consecBlocked >= h.limit:
+		st.tripped = true
+		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_blocked", Confidence: 0.85}
 	}
 }

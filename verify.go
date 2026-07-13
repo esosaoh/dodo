@@ -3,10 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"math/rand"
 	"net/url"
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -18,51 +16,62 @@ type verifyItem struct {
 	title string
 }
 
-// verifyPhase checks every link the crawl didn't already verify; transient
-// failures retry in backoff rounds at the end rather than inline.
-func (e *Engine) verifyPhase(ctx context.Context, links []*link, cr *crawler) ([]LinkResult, []*LinkState) {
-	e.setTotal(len(links))
-	var results []LinkResult
+// attachState consults the cache for one link: recently-verified healthy links
+// short-circuit (checkOne skips the fetch), the rest carry prior state for
+// conditional requests.
+func (e *Engine) attachState(ctx context.Context, it *verifyItem, needsFragBody bool) {
+	if e.Cache == nil {
+		return
+	}
+	states, err := e.Cache.GetStates(ctx, []string{it.l.url})
+	if err != nil {
+		return
+	}
+	st := states[it.l.url]
+	if st == nil {
+		return
+	}
+	needsBody := e.cfg.CheckFragments && needsFragBody
+	if st.Class == ClassAlive && !needsBody && time.Since(st.CheckedAt) < e.cfg.CacheTTL {
+		it.res.verdict = Verdict{Class: ClassAlive, Reason: "cached", Confidence: 0.9}
+		it.res.status = st.Status
+		it.res.cached = true
+		return
+	}
+	it.state = st
+}
 
-	var toCheck []*verifyItem
-	for _, l := range links {
-		if res, ok := cr.verified[l.url]; ok {
-			r := e.finalize(l, res, cr.pageIDs[l.url])
+// assemble builds the report once crawling and checking have both finished.
+func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*LinkState) {
+	if e.cfg.Soft404 {
+		e.retractSuspectSoft404s(items)
+	}
+
+	byURL := make(map[string]*verifyItem, len(items))
+	for _, it := range items {
+		byURL[it.l.url] = it
+	}
+
+	var results []LinkResult
+	for _, l := range cr.reg.all() {
+		switch {
+		case l.malformed:
+			r := e.finalize(l, &checked{verdict: Verdict{Class: ClassMalformed, Reason: "unparseable_href", Confidence: 0.95}}, nil)
+			results = append(results, r)
+			e.checkedOne(true)
+		case cr.verified[l.url] != nil:
+			r := e.finalize(l, cr.verified[l.url], cr.pageIDs[l.url])
 			results = append(results, r)
 			e.checkedOne(r.Broken())
-			continue
+		case byURL[l.url] != nil:
+			it := byURL[l.url]
+			results = append(results, e.finalize(it.l, it.res, it.ids))
 		}
-		toCheck = append(toCheck, &verifyItem{l: l, res: &checked{}})
-	}
-
-	toCheck = e.applyCache(ctx, toCheck, &results)
-
-	pending := e.runPass(ctx, toCheck)
-	for round := 1; round <= e.cfg.MaxRetries && len(pending) > 0; round++ {
-		e.setPhase(PhaseRetry)
-		delay := e.cfg.RetryBaseDelay * (1 << (round - 1))
-		delay += time.Duration(rand.Int63n(int64(delay/4) + 1))
-		select {
-		case <-ctx.Done():
-		case <-time.After(delay):
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		pending = e.runPass(ctx, pending)
-	}
-	for range pending { // only non-empty if the scan was cancelled mid-retry
-		e.checkedOne(false)
-	}
-
-	if e.cfg.Soft404 {
-		e.retractSuspectSoft404s(toCheck)
 	}
 
 	var states []*LinkState
 	now := time.Now()
-	for _, it := range toCheck {
-		results = append(results, e.finalize(it.l, it.res, it.ids))
+	for _, it := range items {
 		if it.res.cached || it.res.attempts == 0 {
 			continue
 		}
@@ -93,75 +102,6 @@ func (e *Engine) verifyPhase(ctx context.Context, links []*link, cr *crawler) ([
 	return results, states
 }
 
-// applyCache short-circuits recently-verified healthy links and attaches
-// prior state to the rest for conditional requests.
-func (e *Engine) applyCache(ctx context.Context, items []*verifyItem, results *[]LinkResult) []*verifyItem {
-	if e.Cache == nil || len(items) == 0 {
-		return items
-	}
-	urls := make([]string, len(items))
-	for i, it := range items {
-		urls[i] = it.l.url
-	}
-	states, err := e.Cache.GetStates(ctx, urls)
-	if err != nil {
-		return items
-	}
-	kept := items[:0]
-	for _, it := range items {
-		st := states[it.l.url]
-		if st == nil {
-			kept = append(kept, it)
-			continue
-		}
-		needsBody := e.cfg.CheckFragments && len(it.l.fragments()) > 0
-		if st.Class == ClassAlive && !needsBody && time.Since(st.CheckedAt) < e.cfg.CacheTTL {
-			it.res.verdict = Verdict{Class: ClassAlive, Reason: "cached", Confidence: 0.9}
-			it.res.status = st.Status
-			it.res.cached = true
-			*results = append(*results, e.finalize(it.l, it.res, nil))
-			e.checkedOne(false)
-			continue
-		}
-		it.state = st
-		kept = append(kept, it)
-	}
-	return kept
-}
-
-func (e *Engine) runPass(ctx context.Context, items []*verifyItem) []*verifyItem {
-	if len(items) == 0 {
-		return nil
-	}
-	ch := make(chan *verifyItem)
-	var mu sync.Mutex
-	var retries []*verifyItem
-	var wg sync.WaitGroup
-
-	workers := min(e.cfg.Workers, len(items))
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for it := range ch {
-				if e.checkOne(ctx, it) {
-					mu.Lock()
-					retries = append(retries, it)
-					mu.Unlock()
-				} else {
-					e.checkedOne(it.res.verdict.Class == ClassDead || it.res.verdict.Class == ClassSoft404)
-				}
-			}
-		}()
-	}
-	for _, it := range items {
-		ch <- it
-	}
-	close(ch)
-	wg.Wait()
-	return retries
-}
-
 // retractSuspectSoft404s downgrades fingerprint matches on hosts where the
 // fingerprint implicated most healthy responses (one-template hosts).
 func (e *Engine) retractSuspectSoft404s(items []*verifyItem) {
@@ -178,6 +118,9 @@ func (e *Engine) retractSuspectSoft404s(items []*verifyItem) {
 
 // checkOne runs one fetch+classify attempt, reporting whether to retry.
 func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
+	if it.res.cached {
+		return false
+	}
 	it.res.attempts++
 	host := hostOf(it.l.url)
 
