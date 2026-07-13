@@ -225,3 +225,37 @@ func TestIncrementalRescanSkipsFreshLinks(t *testing.T) {
 		t.Error("dead link was served from cache")
 	}
 }
+
+func TestTimeoutLinksRetryOnlyOnce(t *testing.T) {
+	var hits int32
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		time.Sleep(2 * time.Second)
+	}))
+	t.Cleanup(slow.Close)
+
+	seed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html(w, fmt.Sprintf(`<html><body><a href="%s/slow">slow</a></body></html>`, slow.URL))
+	}))
+	t.Cleanup(seed.Close)
+
+	cfg := testConfig()
+	cfg.Timeout = 300 * time.Millisecond
+	cfg.MaxRetries = 2
+	cfg.Soft404 = false
+
+	rep, err := newEngine(cfg).Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := findResult(t, rep, slow.URL+"/slow")
+	if r.Class != ClassUnknown || r.Reason != "timeout" {
+		t.Errorf("got %s/%s, want unknown/timeout", r.Class, r.Reason)
+	}
+	if r.Attempts != 2 {
+		t.Errorf("attempts = %d, want 2 (one retry for timeouts, not MaxRetries)", r.Attempts)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("slow endpoint hit %d times, want 2", got)
+	}
+}

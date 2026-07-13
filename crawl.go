@@ -127,11 +127,13 @@ func (c *crawler) process(ctx context.Context, item crawlItem) {
 	if err := c.e.sched.Acquire(ctx, host); err != nil {
 		return
 	}
+	start := time.Now()
 	fr := c.e.fetcher.Fetch(ctx, item.url, FetchOpts{WantBody: true, BodyCap: c.e.cfg.PageBodyBytes})
 	fb, ra := feedbackFor(fr)
 	c.e.sched.Release(host, fb, ra)
 
 	verdict := Classify(fr)
+	c.e.trace(host, start, time.Since(start), fr.Status, "crawl")
 	res := &checked{
 		verdict:    verdict,
 		status:     fr.Status,

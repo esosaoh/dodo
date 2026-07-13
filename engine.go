@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -22,6 +24,10 @@ type Engine struct {
 
 	progMu sync.Mutex
 	prog   Progress
+
+	traceMu    sync.Mutex
+	traceFile  *os.File
+	traceStart time.Time
 }
 
 func newEngine(cfg *Config) *Engine {
@@ -36,7 +42,25 @@ func newEngine(cfg *Config) *Engine {
 	}
 	e.prints = newFingerprints(e)
 	e.robots = newRobotsCache(e)
+	if path := os.Getenv("DODO_TRACE"); path != "" {
+		if f, err := os.Create(path); err == nil {
+			e.traceFile = f
+			e.traceStart = time.Now()
+		}
+	}
 	return e
+}
+
+// trace appends one CSV row per fetch when DODO_TRACE is set: start-offset ms,
+// duration ms, host, status, reason.
+func (e *Engine) trace(host string, start time.Time, dur time.Duration, status int, reason string) {
+	if e.traceFile == nil {
+		return
+	}
+	e.traceMu.Lock()
+	fmt.Fprintf(e.traceFile, "%d,%d,%s,%d,%s\n",
+		start.Sub(e.traceStart).Milliseconds(), dur.Milliseconds(), host, status, reason)
+	e.traceMu.Unlock()
 }
 
 func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {

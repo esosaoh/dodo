@@ -143,11 +143,13 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 		opts.ETag = it.state.ETag
 		opts.LastModified = it.state.LastModified
 	}
+	start := time.Now()
 	fr := e.fetcher.Fetch(ctx, it.l.url, opts)
 	fb, ra := feedbackFor(fr)
 	e.sched.Release(host, fb, ra)
 
 	v := Classify(fr)
+	e.trace(host, start, time.Since(start), fr.Status, v.Reason)
 	e.health.record(host, fr.Err != nil, v)
 	it.res.status = fr.Status
 	it.res.finalURL = fr.FinalURL
