@@ -133,6 +133,13 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 		it.res.verdict = Verdict{Class: ClassUnknown, Reason: "cancelled", Confidence: 0}
 		return false
 	}
+	// re-check after Acquire: the breaker may have tripped while we waited
+	// out a Retry-After pause
+	if v, ok := e.health.trippedVerdict(host); ok {
+		e.sched.Release(host, FeedbackNeutral, 0)
+		it.res.verdict = v
+		return false
+	}
 	opts := FetchOpts{WantBody: true}
 	if it.res.attempts > 1 {
 		// a retry that needs the full timeout twice is almost never coming
@@ -180,7 +187,9 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 	}
 	it.res.verdict = v
 	limit := e.cfg.MaxRetries
-	if v.Reason == "timeout" {
+	// the expensive failures: timeouts burn wall time, 429 hosts make us wait
+	// out their pause — one retry each, then report honestly
+	if v.Reason == "timeout" || v.Reason == "rate_limited" {
 		limit = min(limit, 1)
 	}
 	return v.Retryable && it.res.attempts <= limit

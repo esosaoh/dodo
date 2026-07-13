@@ -94,7 +94,7 @@ func DefaultConfig() *Config {
 		MaxDepth:       3,
 		MaxPages:       2000,
 		Workers:        256,
-		PerHostInit:    4,
+		PerHostInit:    8,
 		PerHostMax:     16,
 		Timeout:        10 * time.Second,
 		UserAgent:      "dodo/0.1 (+https://github.com/esosaoh/dodo)",

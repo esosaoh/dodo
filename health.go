@@ -15,6 +15,7 @@ type hostHealth struct {
 type hostState struct {
 	consecFails   int
 	consecBlocked int
+	rateLimitHits int
 	tripped       bool
 	verdict       Verdict
 }
@@ -54,8 +55,10 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 		// isn't serving us
 		st.consecFails++
 	case v.Class == ClassBlocked && v.Retryable:
-		// 429s are neutral: they neither build nor clear the blocked streak,
-		// and they get their retry rounds
+		// 429s don't build the blocked streak, but a host that keeps
+		// rate-limiting us across pause cycles gets a cumulative budget:
+		// verifying its links politely would take minutes we don't spend
+		st.rateLimitHits++
 		st.consecFails = 0
 	case v.Class == ClassBlocked:
 		st.consecBlocked++
@@ -77,5 +80,8 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 	case st.consecBlocked >= h.limit:
 		st.tripped = true
 		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_blocked", Confidence: 0.85}
+	case st.rateLimitHits >= 3:
+		st.tripped = true
+		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_rate_limited", Confidence: 0.7}
 	}
 }
