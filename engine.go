@@ -55,12 +55,33 @@ func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {
 	}
 
 	e.setPhase(PhaseCrawl)
+	pool := e.newCheckPool(ctx, e.cfg.Workers)
 	cr := newCrawler(e, seedURL)
+	cr.onDiscover = func(l *link, firstRef Ref) {
+		it := &verifyItem{l: l, res: &checked{}}
+		e.attachState(ctx, it, firstRef.Fragment != "")
+		pool.add(it)
+	}
 	cr.run(ctx)
 
 	links := cr.reg.all()
 	e.setPhase(PhaseVerify)
-	results, states := e.verifyPhase(ctx, links, cr)
+	e.setTotal(len(links))
+	for _, l := range links {
+		if l.malformed || l.submitted {
+			continue
+		}
+		if _, ok := cr.verified[l.url]; ok {
+			continue
+		}
+		l.submitted = true
+		it := &verifyItem{l: l, res: &checked{}}
+		e.attachState(ctx, it, len(l.fragments()) > 0)
+		pool.add(it)
+	}
+	pool.finishAdds()
+	items := pool.wait()
+	results, states := e.assemble(cr, items)
 
 	if e.Cache != nil && len(states) > 0 {
 		e.Cache.PutStates(context.WithoutCancel(ctx), states)
@@ -134,6 +155,7 @@ func (e *Engine) emitCrawl(pages, found int) {
 		e.prog.PagesCrawled = pages
 	}
 	e.prog.LinksFound = found
+	e.prog.LinksTotal = found
 	e.emitLocked()
 	e.progMu.Unlock()
 }
