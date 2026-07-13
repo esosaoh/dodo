@@ -120,6 +120,9 @@ func (c *crawler) isInternal(host string) bool {
 
 func (c *crawler) process(ctx context.Context, item crawlItem) {
 	host := hostOf(item.url)
+	if c.e.cfg.RespectRobots && !c.e.robots.allowed(ctx, schemeOf(item.url), host, pathQueryOf(item.url)) {
+		return // not crawled; if it's also a link target, verify still checks it
+	}
 	if err := c.e.sched.Acquire(ctx, host); err != nil {
 		return
 	}

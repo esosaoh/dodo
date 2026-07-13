@@ -14,6 +14,7 @@ type Engine struct {
 	sched   *Scheduler
 	prints  *fingerprints
 	health  *hostHealth
+	robots  *robotsCache
 
 	// optional; set before Run
 	Cache      StateCache
@@ -34,6 +35,7 @@ func newEngine(cfg *Config) *Engine {
 		health:  newHostHealth(cfg.HostFailLimit),
 	}
 	e.prints = newFingerprints(e)
+	e.robots = newRobotsCache(e)
 	return e
 }
 

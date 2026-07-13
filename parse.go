@@ -113,6 +113,18 @@ func normalizeRawURL(raw string) (string, error) {
 	return normalizeURL(u), nil
 }
 
+func pathQueryOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "/"
+	}
+	pq := u.Path
+	if u.RawQuery != "" {
+		pq += "?" + u.RawQuery
+	}
+	return pq
+}
+
 func hostOf(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {

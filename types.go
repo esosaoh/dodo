@@ -75,6 +75,7 @@ type Config struct {
 	Timeout        time.Duration
 	UserAgent      string
 	CheckExternal  bool
+	RespectRobots  bool
 	Soft404        bool
 	CheckFragments bool
 	MaxRetries     int
@@ -95,6 +96,7 @@ func DefaultConfig() *Config {
 		Timeout:        15 * time.Second,
 		UserAgent:      "dodo/0.1 (+https://github.com/esosaoh/dodo)",
 		CheckExternal:  true,
+		RespectRobots:  true,
 		Soft404:        true,
 		CheckFragments: true,
 		MaxRetries:     2,

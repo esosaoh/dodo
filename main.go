@@ -46,6 +46,7 @@ func cmdCheck(args []string) {
 	fs.IntVar(&cfg.PerHostMax, "per-host", cfg.PerHostMax, "max concurrent requests per host")
 	fs.DurationVar(&cfg.Timeout, "timeout", cfg.Timeout, "per-request timeout")
 	fs.BoolVar(&cfg.CheckExternal, "external", cfg.CheckExternal, "check external links")
+	fs.BoolVar(&cfg.RespectRobots, "robots", cfg.RespectRobots, "respect robots.txt when crawling the seed site")
 	fs.BoolVar(&cfg.Soft404, "soft404", cfg.Soft404, "detect soft 404s via response fingerprinting")
 	fs.BoolVar(&cfg.CheckFragments, "fragments", cfg.CheckFragments, "validate #fragment anchors")
 	fs.IntVar(&cfg.MaxRetries, "retries", cfg.MaxRetries, "retry rounds for transient failures")

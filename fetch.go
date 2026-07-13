@@ -14,10 +14,11 @@ import (
 var errTooManyRedirects = errors.New("too many redirects")
 
 type FetchOpts struct {
-	WantBody     bool
-	BodyCap      int64
-	ETag         string
-	LastModified string
+	WantBody       bool
+	AnyContentType bool // read the body even when it isn't HTML
+	BodyCap        int64
+	ETag           string
+	LastModified   string
 }
 
 type FetchResult struct {
@@ -117,7 +118,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string, opts FetchOpts) *Fet
 	if bodyCap == 0 {
 		bodyCap = f.defaultCap
 	}
-	if opts.WantBody && res.IsHTML() {
+	if opts.WantBody && (res.IsHTML() || opts.AnyContentType) {
 		body, rerr := io.ReadAll(io.LimitReader(resp.Body, bodyCap))
 		if rerr == nil {
 			res.Body = body
