@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -12,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/esosaoh/crawl/internal/api"
 	"github.com/esosaoh/crawl/internal/engine"
+	"github.com/esosaoh/crawl/internal/store"
 )
 
 func main() {
@@ -23,6 +26,8 @@ func main() {
 	switch os.Args[1] {
 	case "check":
 		cmdCheck(os.Args[2:])
+	case "serve":
+		cmdServe(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -34,8 +39,49 @@ func usage() {
 
 Usage:
   crawl check <url> [flags]   scan a site and report broken links
+  crawl serve [flags]         run the web UI and REST API
 
-Run 'crawl check -h' for flags.`)
+Run 'crawl check -h' or 'crawl serve -h' for flags.`)
+}
+
+func cmdServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", ":8080", "listen address")
+	mongoURI := fs.String("mongo", os.Getenv("MONGO_URI"), "MongoDB URI for persistent scans (env MONGO_URI); in-memory if unset")
+	mongoDB := fs.String("mongo-db", "deadlink", "MongoDB database name")
+	fs.Parse(args)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var st store.Store
+	if *mongoURI != "" {
+		m, err := store.NewMongo(ctx, *mongoURI, *mongoDB)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: connecting to mongo: %v\n", err)
+			os.Exit(2)
+		}
+		defer m.Close(context.Background())
+		st = m
+		fmt.Println("using MongoDB store")
+	} else {
+		st = store.NewMemory()
+		fmt.Println("using in-memory store (scans are lost on restart; set -mongo to persist)")
+	}
+
+	srv := &http.Server{Addr: *addr, Handler: api.NewServer(st, engine.DefaultConfig()).Handler()}
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(shutCtx)
+	}()
+
+	fmt.Printf("deadlink UI on http://localhost%s\n", *addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func cmdCheck(args []string) {
@@ -50,7 +96,10 @@ func cmdCheck(args []string) {
 	fs.BoolVar(&cfg.Soft404, "soft404", cfg.Soft404, "detect soft 404s via response fingerprinting")
 	fs.BoolVar(&cfg.CheckFragments, "fragments", cfg.CheckFragments, "validate #fragment anchors")
 	fs.IntVar(&cfg.MaxRetries, "retries", cfg.MaxRetries, "retry rounds for transient failures")
+	fs.DurationVar(&cfg.CacheTTL, "cache-ttl", cfg.CacheTTL, "skip re-checking links verified healthy within this window (needs -mongo)")
 	jsonOut := fs.Bool("json", false, "emit the full report as JSON")
+	mongoURI := fs.String("mongo", os.Getenv("MONGO_URI"), "MongoDB URI enabling incremental re-scans (env MONGO_URI)")
+	mongoDB := fs.String("mongo-db", "deadlink", "MongoDB database name")
 	fs.Parse(args)
 
 	seed := fs.Arg(0)
@@ -68,6 +117,15 @@ func cmdCheck(args []string) {
 	defer stop()
 
 	e := engine.New(cfg)
+	if *mongoURI != "" {
+		st, err := store.NewMongo(ctx, *mongoURI, *mongoDB)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: connecting to mongo: %v\n", err)
+			os.Exit(2)
+		}
+		defer st.Close(context.Background())
+		e.Cache = st
+	}
 	if !*jsonOut {
 		e.OnProgress = progressPrinter()
 	}
