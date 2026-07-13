@@ -8,11 +8,12 @@ import (
 type Class string
 
 const (
-	ClassAlive   Class = "alive"
-	ClassDead    Class = "dead"
-	ClassSoft404 Class = "soft_404"
-	ClassBlocked Class = "blocked"
-	ClassUnknown Class = "unknown"
+	ClassAlive     Class = "alive"
+	ClassDead      Class = "dead"
+	ClassSoft404   Class = "soft_404"
+	ClassMalformed Class = "malformed"
+	ClassBlocked   Class = "blocked"
+	ClassUnknown   Class = "unknown"
 )
 
 func severity(c Class) int {
@@ -21,10 +22,12 @@ func severity(c Class) int {
 		return 0
 	case ClassSoft404:
 		return 1
-	case ClassBlocked:
+	case ClassMalformed:
 		return 2
-	case ClassUnknown:
+	case ClassBlocked:
 		return 3
+	case ClassUnknown:
+		return 4
 	default:
 		return 4
 	}
@@ -51,7 +54,7 @@ type LinkResult struct {
 }
 
 func (r *LinkResult) Broken() bool {
-	return r.Class == ClassDead || r.Class == ClassSoft404
+	return r.Class == ClassDead || r.Class == ClassSoft404 || r.Class == ClassMalformed
 }
 
 type Report struct {
@@ -113,7 +116,6 @@ type Phase string
 const (
 	PhaseCrawl  Phase = "crawl"
 	PhaseVerify Phase = "verify"
-	PhaseRetry  Phase = "retry"
 	PhaseDone   Phase = "done"
 )
 

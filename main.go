@@ -123,6 +123,7 @@ var classLabels = []struct {
 }{
 	{ClassDead, "DEAD"},
 	{ClassSoft404, "SOFT 404"},
+	{ClassMalformed, "MALFORMED (invalid href on page)"},
 	{ClassBlocked, "BLOCKED (could not verify: bot protection / auth)"},
 	{ClassUnknown, "UNKNOWN"},
 }

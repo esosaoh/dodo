@@ -24,9 +24,10 @@ type checked struct {
 }
 
 type crawler struct {
-	e    *Engine
-	seed string
-	reg  *registry
+	e          *Engine
+	seed       string
+	reg        *registry
+	onDiscover func(l *link, firstRef Ref)
 
 	mu            sync.Mutex
 	internalHosts map[string]bool
@@ -174,14 +175,25 @@ func (c *crawler) process(ctx context.Context, item crawlItem) {
 	c.pageIDs[item.url] = pd.IDs
 	c.mu.Unlock()
 
+	for _, rl := range pd.Malformed {
+		c.reg.addMalformed(rl.URL, Ref{Page: item.url, Text: rl.Text})
+	}
 	for _, rl := range pd.Links {
 		internal := c.isInternal(hostOf(rl.URL))
 		if !internal && !c.e.cfg.CheckExternal {
 			continue
 		}
-		c.reg.add(rl.URL, internal, Ref{Page: item.url, Fragment: rl.Fragment, Text: rl.Text})
-		if internal && item.depth < c.e.cfg.MaxDepth && !isNonHTMLURL(rl.URL) {
+		ref := Ref{Page: item.url, Fragment: rl.Fragment, Text: rl.Text}
+		isNew, l := c.reg.add(rl.URL, internal, ref)
+		crawlable := internal && !isNonHTMLURL(rl.URL)
+		if crawlable && item.depth < c.e.cfg.MaxDepth {
 			c.enqueue(rl.URL, item.depth+1)
+		}
+		// crawlable links are left for the post-crawl sweep (they may yet be
+		// crawled); everything else starts verifying immediately
+		if isNew && !crawlable && c.onDiscover != nil {
+			l.submitted = true
+			c.onDiscover(l, ref)
 		}
 	}
 	c.e.emitCrawl(-1, c.reg.size())

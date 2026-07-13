@@ -16,9 +16,10 @@ type RawLink struct {
 }
 
 type PageData struct {
-	Title string
-	Links []RawLink
-	IDs   map[string]struct{}
+	Title     string
+	Links     []RawLink
+	Malformed []RawLink // href is in URL, unparseable as a URL
+	IDs       map[string]struct{}
 }
 
 func ParsePage(body io.Reader, baseURL string) (*PageData, error) {
@@ -39,8 +40,19 @@ func ParsePage(body io.Reader, baseURL string) (*PageData, error) {
 	seen := make(map[string]bool)
 	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
 		href, _ := s.Attr("href")
+		text := strings.Join(strings.Fields(s.Text()), " ")
+		if len(text) > 80 {
+			text = text[:80]
+		}
 		u, err := url.Parse(strings.TrimSpace(href))
+		if err == nil && u.Host == "" && u.Scheme != "" && u.Opaque == "" && !isBenignScheme(u.Scheme) {
+			err = fmt.Errorf("scheme %q with no host", u.Scheme)
+		}
 		if err != nil {
+			if !seen["!"+href] {
+				seen["!"+href] = true
+				pd.Malformed = append(pd.Malformed, RawLink{URL: href, Text: text})
+			}
 			return
 		}
 		abs := base.ResolveReference(u)
@@ -55,11 +67,6 @@ func ParsePage(body io.Reader, baseURL string) (*PageData, error) {
 			return
 		}
 		seen[key] = true
-
-		text := strings.Join(strings.Fields(s.Text()), " ")
-		if len(text) > 80 {
-			text = text[:80]
-		}
 		pd.Links = append(pd.Links, RawLink{URL: normalized, Fragment: frag, Text: text})
 	})
 
@@ -75,6 +82,15 @@ func ParsePage(body io.Reader, baseURL string) (*PageData, error) {
 	})
 
 	return pd, nil
+}
+
+// mailto:, javascript: and friends are intentional non-web links, not authoring bugs
+func isBenignScheme(scheme string) bool {
+	switch strings.ToLower(scheme) {
+	case "mailto", "tel", "sms", "javascript", "data", "ftp", "file", "irc", "magnet", "webcal", "matrix", "xmpp":
+		return true
+	}
+	return false
 }
 
 func normalizeURL(u *url.URL) string {
