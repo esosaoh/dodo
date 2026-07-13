@@ -15,7 +15,8 @@ var errTooManyRedirects = errors.New("too many redirects")
 
 type FetchOpts struct {
 	WantBody       bool
-	AnyContentType bool // read the body even when it isn't HTML
+	AnyContentType bool          // read the body even when it isn't HTML
+	Timeout        time.Duration // overrides the fetcher default when > 0
 	BodyCap        int64
 	ETag           string
 	LastModified   string
@@ -81,7 +82,11 @@ func NewFetcher(cfg *Config) *Fetcher {
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string, opts FetchOpts) *FetchResult {
 	res := &FetchResult{URL: rawURL, FinalURL: rawURL}
 
-	ctx, cancel := context.WithTimeout(ctx, f.timeout)
+	timeout := f.timeout
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)

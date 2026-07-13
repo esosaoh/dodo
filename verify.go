@@ -134,6 +134,11 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 		return false
 	}
 	opts := FetchOpts{WantBody: true}
+	if it.res.attempts > 1 {
+		// a retry that needs the full timeout twice is almost never coming
+		// back; spend half as long on it
+		opts.Timeout = max(e.cfg.Timeout/2, 5*time.Second)
+	}
 	if it.state != nil {
 		opts.ETag = it.state.ETag
 		opts.LastModified = it.state.LastModified
@@ -172,7 +177,11 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 		v.Confidence = 0.8
 	}
 	it.res.verdict = v
-	return v.Retryable && it.res.attempts <= e.cfg.MaxRetries
+	limit := e.cfg.MaxRetries
+	if v.Reason == "timeout" {
+		limit = min(limit, 1)
+	}
+	return v.Retryable && it.res.attempts <= limit
 }
 
 func (e *Engine) finalize(l *link, res *checked, ids map[string]struct{}) LinkResult {
