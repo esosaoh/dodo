@@ -30,7 +30,7 @@ func newFileCache(path string) (*fileCache, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resolve cache dir: %w", err)
 		}
-		path = filepath.Join(dir, "deadlink", "links.json.gz")
+		path = filepath.Join(dir, "dodo", "links.json.gz")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create cache dir: %w", err)

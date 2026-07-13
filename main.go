@@ -28,13 +28,13 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `deadlink — a fast, low-false-positive dead link checker
+	fmt.Fprintln(os.Stderr, `dodo — a fast, low-false-positive dead link checker
 
 Usage:
-  deadlink check <url> [flags]   scan a site and report broken links
+  dodo check <url> [flags]   scan a site and report broken links
 
 Exit codes: 0 no broken links, 1 broken links found, 2 error.
-Run 'deadlink check -h' for flags.`)
+Run 'dodo check -h' for flags.`)
 }
 
 func cmdCheck(args []string) {
@@ -56,7 +56,7 @@ func cmdCheck(args []string) {
 
 	seed := fs.Arg(0)
 	if seed == "" {
-		fmt.Fprintln(os.Stderr, "usage: deadlink check <url> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: dodo check <url> [flags]")
 		os.Exit(2)
 	}
 	// flag stops at the first positional arg; re-parse anything after the URL

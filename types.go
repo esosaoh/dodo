@@ -93,7 +93,7 @@ func DefaultConfig() *Config {
 		PerHostInit:    4,
 		PerHostMax:     16,
 		Timeout:        15 * time.Second,
-		UserAgent:      "deadlink/0.1 (+https://github.com/esosaoh/crawl)",
+		UserAgent:      "dodo/0.1 (+https://github.com/esosaoh/dodo)",
 		CheckExternal:  true,
 		Soft404:        true,
 		CheckFragments: true,

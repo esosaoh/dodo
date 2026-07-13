@@ -45,11 +45,11 @@ func TestSimhashStripsEchoedPathTokens(t *testing.T) {
 	// Hosts that echo the requested URL into an otherwise identical template
 	// must fingerprint identically once path tokens are stripped.
 	root := []byte(`<html><body>A perfectly healthy page with words about topic /</body></html>`)
-	probe := []byte(`<html><body>A perfectly healthy page with words about topic /deadlink-probe-8f3a2c91</body></html>`)
+	probe := []byte(`<html><body>A perfectly healthy page with words about topic /dodo-probe-8f3a2c91</body></html>`)
 	link := []byte(`<html><body>A perfectly healthy page with words about topic /res/42</body></html>`)
 
 	rootHash := simhashHTML(root, pathTokens("http://x/"))
-	probeHash := simhashHTML(probe, pathTokens("http://x/deadlink-probe-8f3a2c91"))
+	probeHash := simhashHTML(probe, pathTokens("http://x/dodo-probe-8f3a2c91"))
 	linkHash := simhashHTML(link, pathTokens("http://x/res/42"))
 
 	if d := hamming(rootHash, probeHash); d > simhashThreshold {

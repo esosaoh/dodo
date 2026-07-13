@@ -1,4 +1,4 @@
-module github.com/esosaoh/crawl
+module github.com/esosaoh/dodo
 
 go 1.25.2
 

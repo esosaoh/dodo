@@ -132,7 +132,7 @@ func (e *Engine) probeFetch(ctx context.Context, host, url string) *FetchResult 
 func randomSlug() string {
 	b := make([]byte, 16)
 	rand.Read(b)
-	return "deadlink-probe-" + hex.EncodeToString(b)
+	return "dodo-probe-" + hex.EncodeToString(b)
 }
 
 var (
