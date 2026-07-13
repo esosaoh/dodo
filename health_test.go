@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHostHealthTripsAfterConsecutiveFailures(t *testing.T) {
@@ -163,5 +164,42 @@ func TestBlockedHostShortCircuit(t *testing.T) {
 	}
 	if shortCircuited == 0 {
 		t.Error("no links short-circuited; blocked-host breaker never tripped")
+	}
+}
+
+func TestHostHealthRateLimitBudget(t *testing.T) {
+	h := newHostHealth(5)
+	clock := time.Now()
+	h.now = func() time.Time { return clock }
+	rl := Verdict{Class: ClassBlocked, Reason: "rate_limited", Confidence: 0.5, Retryable: true}
+
+	// 429s within the budget window are patience, not a verdict.
+	h.record("wall429.example", false, rl)
+	clock = clock.Add(5 * time.Second)
+	h.record("wall429.example", false, rl)
+	if _, ok := h.trippedVerdict("wall429.example"); ok {
+		t.Fatal("tripped inside the rate-limit budget")
+	}
+
+	// Still 429ing after the budget: give up on the host.
+	clock = clock.Add(rateLimitBudget)
+	h.record("wall429.example", false, rl)
+	v, ok := h.trippedVerdict("wall429.example")
+	if !ok || v.Reason != "host_rate_limited" || v.Class != ClassBlocked {
+		t.Fatalf("want blocked/host_rate_limited, got %+v ok=%v", v, ok)
+	}
+
+	// A host that stopped 429ing (pacing worked) never trips, no matter how
+	// long ago its first 429 was.
+	h2 := newHostHealth(5)
+	clock2 := time.Now()
+	h2.now = func() time.Time { return clock2 }
+	h2.record("pacing.example", false, rl)
+	clock2 = clock2.Add(2 * rateLimitBudget)
+	for i := 0; i < 50; i++ {
+		h2.record("pacing.example", false, Verdict{Class: ClassAlive})
+	}
+	if _, ok := h2.trippedVerdict("pacing.example"); ok {
+		t.Fatal("host that recovered from 429s must not trip")
 	}
 }

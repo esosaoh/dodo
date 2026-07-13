@@ -106,8 +106,10 @@ func (s *Scheduler) Release(host string, fb Feedback, retryAfter time.Duration) 
 			g.lastDrop = now
 		}
 		if retryAfter > 0 {
-			// honor Retry-After only up to a point: camping on a host that
-			// asked for a minute stalls the whole scan tail
+			// an explicit Retry-After means stop, not "slightly less"
+			g.limit = s.min
+			// honor it only up to a point: camping on a host that asked for
+			// a minute stalls the whole scan tail
 			pause := min(retryAfter, 15*time.Second)
 			until := now.Add(pause)
 			if until.After(g.pauseUntil) {

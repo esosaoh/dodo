@@ -1,6 +1,13 @@
 package main
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
+
+// rateLimitBudget: a host still 429ing this long after its first 429 (with
+// AIMD and Retry-After pauses already applied) won't be reasoned with.
+const rateLimitBudget = 20 * time.Second
 
 // hostHealth holds two per-host circuit breakers: one for hosts that stopped
 // answering (DNS/refused/timeout), one for hosts that keep refusing us
@@ -10,18 +17,20 @@ type hostHealth struct {
 	mu    sync.Mutex
 	hosts map[string]*hostState
 	limit int
+	now   func() time.Time
 }
 
 type hostState struct {
 	consecFails   int
 	consecBlocked int
-	rateLimitHits int
+	first429      time.Time
+	budgetSpent   bool
 	tripped       bool
 	verdict       Verdict
 }
 
 func newHostHealth(limit int) *hostHealth {
-	return &hostHealth{hosts: make(map[string]*hostState), limit: limit}
+	return &hostHealth{hosts: make(map[string]*hostState), limit: limit, now: time.Now}
 }
 
 func (h *hostHealth) trippedVerdict(host string) (Verdict, bool) {
@@ -55,10 +64,11 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 		// isn't serving us
 		st.consecFails++
 	case v.Class == ClassBlocked && v.Retryable:
-		// 429s don't build the blocked streak, but a host that keeps
-		// rate-limiting us across pause cycles gets a cumulative budget:
-		// verifying its links politely would take minutes we don't spend
-		st.rateLimitHits++
+		if st.first429.IsZero() {
+			st.first429 = h.now()
+		} else if h.now().Sub(st.first429) > rateLimitBudget {
+			st.budgetSpent = true
+		}
 		st.consecFails = 0
 	case v.Class == ClassBlocked:
 		st.consecBlocked++
@@ -80,7 +90,7 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 	case st.consecBlocked >= h.limit:
 		st.tripped = true
 		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_blocked", Confidence: 0.85}
-	case st.rateLimitHits >= 3:
+	case st.budgetSpent:
 		st.tripped = true
 		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_rate_limited", Confidence: 0.7}
 	}
