@@ -65,3 +65,24 @@ func TestSchedulerAcquireRespectsCancel(t *testing.T) {
 		t.Error("Acquire with cancelled context should error")
 	}
 }
+
+func TestFeedbackForStatuses(t *testing.T) {
+	cases := []struct {
+		status int
+		want   Feedback
+	}{
+		{200, FeedbackSuccess},
+		{301, FeedbackSuccess},
+		{403, FeedbackNeutral}, // WAF refusal must not grow the window
+		{404, FeedbackNeutral},
+		{429, FeedbackBackoff},
+		{503, FeedbackBackoff},
+		{500, FeedbackNeutral},
+	}
+	for _, c := range cases {
+		fb, _ := feedbackFor(&FetchResult{Status: c.status, Latency: 50 * time.Millisecond})
+		if fb != c.want {
+			t.Errorf("status %d: feedback %v, want %v", c.status, fb, c.want)
+		}
+	}
+}

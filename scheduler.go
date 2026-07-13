@@ -148,7 +148,9 @@ func feedbackFor(r *FetchResult) (Feedback, time.Duration) {
 	if r.Status == 429 || r.Status == 503 {
 		return FeedbackBackoff, r.RetryAfter
 	}
-	if r.Status < 500 && r.Latency < slowLatency {
+	// only 2xx/3xx grow the window: fast 4xx often means a WAF is refusing us,
+	// and speeding up at a host that's blocking us is the wrong response
+	if r.Status < 400 && r.Latency < slowLatency {
 		return FeedbackSuccess, 0
 	}
 	return FeedbackNeutral, 0
