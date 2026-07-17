@@ -1,4 +1,4 @@
-// bench serves a synthetic site with known ground truth for comparing link checkers.
+// e2e serves a synthetic site with known ground truth for comparing link checkers.
 //
 // Layout:
 //
@@ -114,6 +114,6 @@ func main() {
 		page(w, fmt.Sprintf("Page %d", i), body)
 	})
 
-	fmt.Println("bench site ready on http://127.0.0.1:9301")
+	fmt.Println("e2e site ready on http://127.0.0.1:9301")
 	log.Fatal(http.ListenAndServe("127.0.0.1:9301", mux))
 }
