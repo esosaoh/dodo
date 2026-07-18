@@ -55,23 +55,26 @@ func (f *fingerprints) forHost(ctx context.Context, scheme, host string) *hostFP
 }
 
 func (fp *hostFP) probe(ctx context.Context, e *Engine, scheme, host string) {
-	probeURL := scheme + "://" + host + "/" + randomSlug()
-	garbage := e.probeFetch(ctx, host, probeURL)
-	if garbage == nil || garbage.Status != 200 || garbage.Body == nil {
+	url1 := scheme + "://" + host + "/" + randomSlug()
+	first := e.probeFetch(ctx, host, url1)
+	if first == nil || first.Status != 200 || first.Body == nil {
 		return // host 404s properly; no fingerprint needed
 	}
-	garbageHash := simhashHTML(garbage.Body, pathTokens(probeURL))
+	hash1 := simhashHTML(first.Body, pathTokens(url1))
 
-	// SPA guard: a homepage indistinguishable from a garbage URL means one
-	// shell for every route, so the fingerprint proves nothing.
-	rootURL := scheme + "://" + host + "/"
-	root := e.probeFetch(ctx, host, rootURL)
-	if root != nil && root.Status == 200 && root.Body != nil &&
-		hamming(simhashHTML(root.Body, pathTokens(rootURL)), garbageHash) <= simhashThreshold {
+	// Compare to a second garbage URL, not the homepage: hosts that redirect
+	// dead links home would otherwise falsely disable the fingerprint.
+	url2 := scheme + "://" + host + "/" + randomSlug()
+	second := e.probeFetch(ctx, host, url2)
+	if second == nil || second.Status != 200 || second.Body == nil {
 		return
 	}
+	hash2 := simhashHTML(second.Body, pathTokens(url2))
+	if hamming(hash1, hash2) > simhashThreshold {
+		return // inconsistent responses to unknown paths; no stable template
+	}
 
-	fp.hash = garbageHash
+	fp.hash = hash1
 	fp.ok = true
 }
 

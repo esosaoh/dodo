@@ -1,6 +1,66 @@
 package engine
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+)
+
+func TestFingerprintSurvivesRedirectToHomepage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			html(w, `<html><head><title>Welcome</title></head><body>
+Genuine homepage content about a small business that sells handmade furniture
+and ships nationwide with a satisfaction guarantee on every order.
+</body></html>`)
+			return
+		}
+		// unknown paths, including our probes, redirect home
+		http.Redirect(w, r, "/", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	e := NewEngine(testConfig())
+	fp := e.prints.forHost(context.Background(), "http", srv.Listener.Addr().String())
+	if !fp.ok {
+		t.Fatal("expected a fingerprint even though the probe redirected to the homepage")
+	}
+
+	deadPageBody := []byte(`<html><head><title>Welcome</title></head><body>
+Genuine homepage content about a small business that sells handmade furniture
+and ships nationwide with a satisfaction guarantee on every order.
+</body></html>`)
+	if !fp.matches(deadPageBody, "http://"+srv.Listener.Addr().String()+"/vanished-resource") {
+		t.Error("expected the fingerprint to match a link that redirects to the same homepage content")
+	}
+}
+
+func TestFingerprintRejectsInconsistentGarbageResponses(t *testing.T) {
+	var hits int32
+	pages := []string{
+		`<html><head><title>Special offer</title></head><body>
+Save big this week only on our entire catalog of outdoor camping gear and
+survival equipment, free shipping on every order over fifty dollars.
+</body></html>`,
+		`<html><head><title>Weather update</title></head><body>
+Scattered showers expected this afternoon with clearing skies by evening,
+temperatures dropping into the low fifties overnight across the region.
+</body></html>`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		i := atomic.AddInt32(&hits, 1) - 1
+		html(w, pages[int(i)%len(pages)])
+	}))
+	t.Cleanup(srv.Close)
+
+	e := NewEngine(testConfig())
+	fp := e.prints.forHost(context.Background(), "http", srv.Listener.Addr().String())
+	if fp.ok {
+		t.Error("expected no fingerprint when two garbage probes disagree")
+	}
+}
 
 func TestSimhashSimilarPages(t *testing.T) {
 	a := []byte(`<html><body>Sorry, we could not find the page you were looking for. Try searching below or return to the homepage. Error reference 8842.</body></html>`)
