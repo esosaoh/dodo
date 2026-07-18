@@ -101,7 +101,9 @@ type Progress struct {
 	LinksFound   int   `json:"links_found"`
 	LinksChecked int   `json:"links_checked"`
 	LinksTotal   int   `json:"links_total"`
+	Alive        int   `json:"alive"`
 	Broken       int   `json:"broken"`
+	Blocked      int   `json:"blocked"`
 }
 
 type ProgressFunc func(Progress)

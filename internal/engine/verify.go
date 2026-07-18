@@ -77,13 +77,13 @@ func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*ca
 		case l.malformed:
 			r := e.finalize(l, &checked{verdict: classify.Verdict{Class: classify.ClassMalformed, Reason: "unparseable_href", Confidence: 0.95}}, nil)
 			results = append(results, r)
-			e.checkedOne(true)
+			e.checkedOne(r.Class, true)
 		case cr.verified[l.url] != nil:
 			res := cr.verified[l.url]
 			r := e.finalize(l, res, cr.pageIDs[l.url])
 			r.PrevClass = res.prevClass
 			results = append(results, r)
-			e.checkedOne(r.Broken())
+			e.checkedOne(r.Class, r.Broken())
 		case byURL[l.url] != nil:
 			it := byURL[l.url]
 			r := e.finalize(it.l, it.res, it.ids)

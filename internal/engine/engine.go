@@ -173,11 +173,16 @@ func (e *Engine) setTotal(n int) {
 	e.progMu.Unlock()
 }
 
-func (e *Engine) checkedOne(broken bool) {
+func (e *Engine) checkedOne(class classify.Class, broken bool) {
 	e.progMu.Lock()
 	e.prog.LinksChecked++
-	if broken {
+	switch {
+	case broken:
 		e.prog.Broken++
+	case class == classify.ClassAlive:
+		e.prog.Alive++
+	case class == classify.ClassBlocked:
+		e.prog.Blocked++
 	}
 	e.emitLocked()
 	e.progMu.Unlock()

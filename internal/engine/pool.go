@@ -103,7 +103,8 @@ func (p *checkPool) worker() {
 			continue
 		}
 
-		p.e.checkedOne(it.res.verdict.Class == classify.ClassDead || it.res.verdict.Class == classify.ClassSoft404)
+		class := it.res.verdict.Class
+		p.e.checkedOne(class, class == classify.ClassDead || class == classify.ClassSoft404)
 		p.mu.Lock()
 		p.pending--
 		if p.pending == 0 && p.noMore {
