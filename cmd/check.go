@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/esosaoh/dodo/internal/cache"
+	"github.com/esosaoh/dodo/internal/classify"
 	"github.com/esosaoh/dodo/internal/engine"
 )
 
@@ -49,8 +51,8 @@ func cmdCheck(args []string) {
 
 	e := engine.NewEngine(cfg)
 	if !*noCache {
-		if cache, err := engine.NewFileCache(""); err == nil {
-			e.Cache = cache
+		if fc, err := cache.NewFileCache(""); err == nil {
+			e.Cache = fc
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: cache disabled: %v\n", err)
 		}
@@ -96,14 +98,14 @@ func progressPrinter() engine.ProgressFunc {
 }
 
 var classLabels = []struct {
-	class engine.Class
+	class classify.Class
 	label string
 }{
-	{engine.ClassDead, "DEAD"},
-	{engine.ClassSoft404, "SOFT 404"},
-	{engine.ClassMalformed, "MALFORMED (invalid href on page)"},
-	{engine.ClassBlocked, "BLOCKED (could not verify: bot protection / auth)"},
-	{engine.ClassUnknown, "UNKNOWN"},
+	{classify.ClassDead, "DEAD"},
+	{classify.ClassSoft404, "SOFT 404"},
+	{classify.ClassMalformed, "MALFORMED (invalid href on page)"},
+	{classify.ClassBlocked, "BLOCKED (could not verify: bot protection / auth)"},
+	{classify.ClassUnknown, "UNKNOWN"},
 }
 
 func printReport(rep *engine.Report) {
@@ -154,8 +156,8 @@ func printReport(rep *engine.Report) {
 	}
 
 	fmt.Printf("\n✓ %d alive · ✗ %d broken · %d blocked · %d unknown\n",
-		rep.Counts[engine.ClassAlive], rep.Broken,
-		rep.Counts[engine.ClassBlocked], rep.Counts[engine.ClassUnknown])
+		rep.Counts[classify.ClassAlive], rep.Broken,
+		rep.Counts[classify.ClassBlocked], rep.Counts[classify.ClassUnknown])
 }
 
 func printRefs(refs []engine.Ref) {

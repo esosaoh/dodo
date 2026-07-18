@@ -7,15 +7,20 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
+	"github.com/esosaoh/dodo/internal/fetch"
+	"github.com/esosaoh/dodo/internal/health"
+	"github.com/esosaoh/dodo/internal/scheduler"
 )
 
 // Engine runs one scan; single-use.
 type Engine struct {
 	cfg     *Config
-	fetcher *Fetcher
-	sched   *Scheduler
+	fetcher *fetch.Fetcher
+	sched   *scheduler.Scheduler
 	prints  *fingerprints
-	health  *hostHealth
+	health  *health.HostHealth
 	robots  *robotsCache
 
 	// optional; set before Run
@@ -36,9 +41,9 @@ func NewEngine(cfg *Config) *Engine {
 	}
 	e := &Engine{
 		cfg:     cfg,
-		fetcher: NewFetcher(cfg),
-		sched:   NewScheduler(cfg),
-		health:  newHostHealth(cfg.HostFailLimit),
+		fetcher: fetch.NewFetcher(cfg.Timeout, cfg.UserAgent, cfg.MaxBodyBytes),
+		sched:   scheduler.NewScheduler(cfg.PerHostInit, cfg.PerHostMax),
+		health:  health.NewHostHealth(cfg.HostFailLimit),
 	}
 	e.prints = newFingerprints(e)
 	e.robots = newRobotsCache(e)
@@ -75,7 +80,7 @@ func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {
 	rep := &Report{
 		Seed:      seedURL,
 		StartedAt: time.Now(),
-		Counts:    make(map[Class]int),
+		Counts:    make(map[classify.Class]int),
 	}
 
 	e.setPhase(PhaseCrawl)
@@ -112,7 +117,7 @@ func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {
 	}
 
 	sort.Slice(results, func(i, j int) bool {
-		si, sj := severity(results[i].Class), severity(results[j].Class)
+		si, sj := classify.Severity(results[i].Class), classify.Severity(results[j].Class)
 		if si != sj {
 			return si < sj
 		}

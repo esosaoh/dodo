@@ -3,35 +3,10 @@ package engine
 import (
 	"context"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/cache"
+	"github.com/esosaoh/dodo/internal/classify"
 )
-
-type Class string
-
-const (
-	ClassAlive     Class = "alive"
-	ClassDead      Class = "dead"
-	ClassSoft404   Class = "soft_404"
-	ClassMalformed Class = "malformed"
-	ClassBlocked   Class = "blocked"
-	ClassUnknown   Class = "unknown"
-)
-
-func severity(c Class) int {
-	switch c {
-	case ClassDead:
-		return 0
-	case ClassSoft404:
-		return 1
-	case ClassMalformed:
-		return 2
-	case ClassBlocked:
-		return 3
-	case ClassUnknown:
-		return 4
-	default:
-		return 4
-	}
-}
 
 type Ref struct {
 	Page     string `json:"page"`
@@ -40,33 +15,33 @@ type Ref struct {
 }
 
 type LinkResult struct {
-	URL              string   `json:"url"`
-	Internal         bool     `json:"internal"`
-	Class            Class    `json:"class"`
-	Status           int      `json:"status,omitempty"`
-	Reason           string   `json:"reason,omitempty"`
-	Confidence       float64  `json:"confidence"`
-	FinalURL         string   `json:"final_url,omitempty"`
-	Attempts         int      `json:"attempts,omitempty"`
-	Cached           bool     `json:"cached,omitempty"`
-	MissingFragments []string `json:"missing_fragments,omitempty"`
-	Refs             []Ref    `json:"refs"`
+	URL              string         `json:"url"`
+	Internal         bool           `json:"internal"`
+	Class            classify.Class `json:"class"`
+	Status           int            `json:"status,omitempty"`
+	Reason           string         `json:"reason,omitempty"`
+	Confidence       float64        `json:"confidence"`
+	FinalURL         string         `json:"final_url,omitempty"`
+	Attempts         int            `json:"attempts,omitempty"`
+	Cached           bool           `json:"cached,omitempty"`
+	MissingFragments []string       `json:"missing_fragments,omitempty"`
+	Refs             []Ref          `json:"refs"`
 }
 
 func (r *LinkResult) Broken() bool {
-	return r.Class == ClassDead || r.Class == ClassSoft404 || r.Class == ClassMalformed
+	return r.Class == classify.ClassDead || r.Class == classify.ClassSoft404 || r.Class == classify.ClassMalformed
 }
 
 type Report struct {
-	Seed         string        `json:"seed"`
-	StartedAt    time.Time     `json:"started_at"`
-	FinishedAt   time.Time     `json:"finished_at"`
-	PagesCrawled int           `json:"pages_crawled"`
-	TotalLinks   int           `json:"total_links"`
-	Cached       int           `json:"cached"`
-	Counts       map[Class]int `json:"counts"`
-	Broken       int           `json:"broken"`
-	Results      []LinkResult  `json:"results"`
+	Seed         string                 `json:"seed"`
+	StartedAt    time.Time              `json:"started_at"`
+	FinishedAt   time.Time              `json:"finished_at"`
+	PagesCrawled int                    `json:"pages_crawled"`
+	TotalLinks   int                    `json:"total_links"`
+	Cached       int                    `json:"cached"`
+	Counts       map[classify.Class]int `json:"counts"`
+	Broken       int                    `json:"broken"`
+	Results      []LinkResult           `json:"results"`
 }
 
 type Config struct {
@@ -130,18 +105,7 @@ type Progress struct {
 
 type ProgressFunc func(Progress)
 
-type LinkState struct {
-	URL          string
-	Class        Class
-	Status       int
-	ETag         string
-	LastModified string
-	CheckedAt    time.Time
-	Fails        int
-	Successes    int
-}
-
 type StateCache interface {
-	GetStates(ctx context.Context, urls []string) (map[string]*LinkState, error)
-	PutStates(ctx context.Context, states []*LinkState) error
+	GetStates(ctx context.Context, urls []string) (map[string]*cache.LinkState, error)
+	PutStates(ctx context.Context, states []*cache.LinkState) error
 }

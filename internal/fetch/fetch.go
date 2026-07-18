@@ -1,4 +1,4 @@
-package engine
+package fetch
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var errTooManyRedirects = errors.New("too many redirects")
+var ErrTooManyRedirects = errors.New("too many redirects")
 
 type FetchOpts struct {
 	WantBody       bool
@@ -47,7 +47,7 @@ type Fetcher struct {
 	defaultCap int64
 }
 
-func NewFetcher(cfg *Config) *Fetcher {
+func NewFetcher(timeout time.Duration, userAgent string, maxBodyBytes int64) *Fetcher {
 	transport := &http.Transport{
 		Proxy:             http.ProxyFromEnvironment,
 		ForceAttemptHTTP2: true, // custom transports disable h2 by default
@@ -59,21 +59,21 @@ func NewFetcher(cfg *Config) *Fetcher {
 		MaxIdleConns:          256,
 		MaxIdleConnsPerHost:   8,
 		IdleConnTimeout:       30 * time.Second,
-		ResponseHeaderTimeout: cfg.Timeout,
+		ResponseHeaderTimeout: timeout,
 	}
 	return &Fetcher{
 		client: &http.Client{
 			Transport: transport,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 10 {
-					return errTooManyRedirects
+					return ErrTooManyRedirects
 				}
 				return nil
 			},
 		},
-		ua:         cfg.UserAgent,
-		timeout:    cfg.Timeout,
-		defaultCap: cfg.MaxBodyBytes,
+		ua:         userAgent,
+		timeout:    timeout,
+		defaultCap: maxBodyBytes,
 	}
 }
 

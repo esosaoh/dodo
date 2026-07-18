@@ -1,9 +1,12 @@
-package engine
+package scheduler
 
 import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
+	"github.com/esosaoh/dodo/internal/fetch"
 )
 
 type Feedback int
@@ -38,12 +41,12 @@ type hostGate struct {
 	closed     bool
 }
 
-func NewScheduler(cfg *Config) *Scheduler {
+func NewScheduler(perHostInit, perHostMax int) *Scheduler {
 	return &Scheduler{
 		gates:   make(map[string]*hostGate),
-		initial: float64(cfg.PerHostInit),
+		initial: float64(perHostInit),
 		min:     1,
-		max:     float64(cfg.PerHostMax),
+		max:     float64(perHostMax),
 	}
 }
 
@@ -141,9 +144,9 @@ func (s *Scheduler) Shutdown() {
 	}
 }
 
-func feedbackFor(r *FetchResult) (Feedback, time.Duration) {
+func FeedbackFor(r *fetch.FetchResult) (Feedback, time.Duration) {
 	if r.Err != nil {
-		v := classifyErr(r.Err)
+		v := classify.ClassifyErr(r.Err)
 		if v.Reason == "timeout" {
 			return FeedbackBackoff, 0
 		}

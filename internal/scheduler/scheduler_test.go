@@ -1,16 +1,15 @@
-package engine
+package scheduler
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/fetch"
 )
 
 func testScheduler() *Scheduler {
-	cfg := DefaultConfig()
-	cfg.PerHostInit = 4
-	cfg.PerHostMax = 16
-	return NewScheduler(cfg)
+	return NewScheduler(4, 16)
 }
 
 func TestSchedulerBackoffHalvesLimit(t *testing.T) {
@@ -80,7 +79,7 @@ func TestFeedbackForStatuses(t *testing.T) {
 		{500, FeedbackNeutral},
 	}
 	for _, c := range cases {
-		fb, _ := feedbackFor(&FetchResult{Status: c.status, Latency: 50 * time.Millisecond})
+		fb, _ := FeedbackFor(&fetch.FetchResult{Status: c.status, Latency: 50 * time.Millisecond})
 		if fb != c.want {
 			t.Errorf("status %d: feedback %v, want %v", c.status, fb, c.want)
 		}

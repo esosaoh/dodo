@@ -1,9 +1,11 @@
-package engine
+package classify
 
 import (
 	"net"
 	"net/http"
 	"testing"
+
+	"github.com/esosaoh/dodo/internal/fetch"
 )
 
 func TestClassifyStatus(t *testing.T) {
@@ -31,7 +33,7 @@ func TestClassifyStatus(t *testing.T) {
 		{999, nil, ClassBlocked, false},
 	}
 	for _, c := range cases {
-		v := Classify(&FetchResult{Status: c.status, Header: c.header})
+		v := Classify(&fetch.FetchResult{Status: c.status, Header: c.header})
 		if v.Class != c.class || v.Retryable != c.retryable {
 			t.Errorf("status %d: got (%s, retryable=%v), want (%s, retryable=%v)",
 				c.status, v.Class, v.Retryable, c.class, c.retryable)
@@ -41,7 +43,7 @@ func TestClassifyStatus(t *testing.T) {
 
 func TestClassifyDNSNotFound(t *testing.T) {
 	err := &net.DNSError{IsNotFound: true}
-	v := Classify(&FetchResult{Err: err})
+	v := Classify(&fetch.FetchResult{Err: err})
 	if v.Class != ClassDead || v.Reason != "dns_nxdomain" || v.Retryable {
 		t.Errorf("got %+v, want dead/dns_nxdomain/non-retryable", v)
 	}

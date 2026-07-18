@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/esosaoh/dodo/internal/fetch"
+	"github.com/esosaoh/dodo/internal/scheduler"
 )
 
 // max Hamming distance (of 64 bits) at which two pages count as the same template
@@ -116,12 +119,12 @@ func pathTokens(rawURL string) []string {
 	return toks
 }
 
-func (e *Engine) probeFetch(ctx context.Context, host, url string) *FetchResult {
+func (e *Engine) probeFetch(ctx context.Context, host, url string) *fetch.FetchResult {
 	if err := e.sched.Acquire(ctx, host); err != nil {
 		return nil
 	}
-	fr := e.fetcher.Fetch(ctx, url, FetchOpts{WantBody: true})
-	fb, ra := feedbackFor(fr)
+	fr := e.fetcher.Fetch(ctx, url, fetch.FetchOpts{WantBody: true})
+	fb, ra := scheduler.FeedbackFor(fr)
 	e.sched.Release(host, fb, ra)
 	if fr.Err != nil || !fr.IsHTML() {
 		return nil

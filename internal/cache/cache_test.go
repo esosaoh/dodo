@@ -1,4 +1,4 @@
-package engine
+package cache
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 func TestFileCacheRoundTrip(t *testing.T) {
@@ -17,8 +19,8 @@ func TestFileCacheRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := []*LinkState{
-		{URL: "https://a.example/x", Class: ClassAlive, Status: 200, ETag: `"v1"`, CheckedAt: time.Now(), Successes: 1},
-		{URL: "https://b.example/y", Class: ClassDead, Status: 404, CheckedAt: time.Now(), Fails: 2},
+		{URL: "https://a.example/x", Class: classify.ClassAlive, Status: 200, ETag: `"v1"`, CheckedAt: time.Now(), Successes: 1},
+		{URL: "https://b.example/y", Class: classify.ClassDead, Status: 404, CheckedAt: time.Now(), Fails: 2},
 	}
 	if err := c1.PutStates(ctx, in); err != nil {
 		t.Fatal(err)
@@ -37,7 +39,7 @@ func TestFileCacheRoundTrip(t *testing.T) {
 		t.Fatalf("got %d states, want 2", len(got))
 	}
 	a := got["https://a.example/x"]
-	if a.Class != ClassAlive || a.ETag != `"v1"` || a.Successes != 1 {
+	if a.Class != classify.ClassAlive || a.ETag != `"v1"` || a.Successes != 1 {
 		t.Errorf("state mismatched after reload: %+v", a)
 	}
 }
@@ -51,11 +53,11 @@ func TestFileCachePrunesOldEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.PutStates(ctx, []*LinkState{
-		{URL: "https://old.example/", Class: ClassAlive, CheckedAt: time.Now().Add(-cacheMaxAge - time.Hour)},
+		{URL: "https://old.example/", Class: classify.ClassAlive, CheckedAt: time.Now().Add(-cacheMaxAge - time.Hour)},
 	})
 	// Any later write triggers pruning of expired entries.
 	c.PutStates(ctx, []*LinkState{
-		{URL: "https://new.example/", Class: ClassAlive, CheckedAt: time.Now()},
+		{URL: "https://new.example/", Class: classify.ClassAlive, CheckedAt: time.Now()},
 	})
 
 	got, _ := c.GetStates(ctx, []string{"https://old.example/", "https://new.example/"})
@@ -81,7 +83,7 @@ func TestFileCacheSurvivesCorruptFile(t *testing.T) {
 		t.Errorf("corrupt cache should behave as empty, got %v (err %v)", got, err)
 	}
 	// And writing must recover it.
-	if err := c.PutStates(context.Background(), []*LinkState{{URL: "https://a.example/", Class: ClassAlive, CheckedAt: time.Now()}}); err != nil {
+	if err := c.PutStates(context.Background(), []*LinkState{{URL: "https://a.example/", Class: classify.ClassAlive, CheckedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 }

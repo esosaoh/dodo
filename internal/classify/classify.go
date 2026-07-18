@@ -1,11 +1,41 @@
-package engine
+package classify
 
 import (
 	"errors"
 	"net"
 	"strings"
 	"syscall"
+
+	"github.com/esosaoh/dodo/internal/fetch"
 )
+
+type Class string
+
+const (
+	ClassAlive     Class = "alive"
+	ClassDead      Class = "dead"
+	ClassSoft404   Class = "soft_404"
+	ClassMalformed Class = "malformed"
+	ClassBlocked   Class = "blocked"
+	ClassUnknown   Class = "unknown"
+)
+
+func Severity(c Class) int {
+	switch c {
+	case ClassDead:
+		return 0
+	case ClassSoft404:
+		return 1
+	case ClassMalformed:
+		return 2
+	case ClassBlocked:
+		return 3
+	case ClassUnknown:
+		return 4
+	default:
+		return 4
+	}
+}
 
 // Confidence is how sure we are of the Class, not of the link being broken.
 type Verdict struct {
@@ -15,14 +45,14 @@ type Verdict struct {
 	Retryable  bool
 }
 
-func Classify(r *FetchResult) Verdict {
+func Classify(r *fetch.FetchResult) Verdict {
 	if r.Err != nil {
-		return classifyErr(r.Err)
+		return ClassifyErr(r.Err)
 	}
 	return classifyStatus(r)
 }
 
-func classifyErr(err error) Verdict {
+func ClassifyErr(err error) Verdict {
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
 		if dnsErr.IsNotFound {
@@ -30,7 +60,7 @@ func classifyErr(err error) Verdict {
 		}
 		return Verdict{ClassUnknown, "dns_error", 0.4, true}
 	}
-	if errors.Is(err, errTooManyRedirects) {
+	if errors.Is(err, fetch.ErrTooManyRedirects) {
 		return Verdict{ClassDead, "redirect_loop", 0.9, false}
 	}
 	msg := err.Error()
@@ -47,7 +77,7 @@ func classifyErr(err error) Verdict {
 	return Verdict{ClassUnknown, "network_error", 0.4, true}
 }
 
-func classifyStatus(r *FetchResult) Verdict {
+func classifyStatus(r *fetch.FetchResult) Verdict {
 	s := r.Status
 	switch {
 	case s == 304:
@@ -101,7 +131,7 @@ func classifyStatus(r *FetchResult) Verdict {
 	return Verdict{ClassUnknown, "unexpected_status", 0.4, false}
 }
 
-func looksBotProtected(r *FetchResult) bool {
+func looksBotProtected(r *fetch.FetchResult) bool {
 	if r.Header == nil {
 		return false
 	}

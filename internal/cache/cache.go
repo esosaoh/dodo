@@ -1,4 +1,4 @@
-package engine
+package cache
 
 import (
 	"compress/gzip"
@@ -9,10 +9,23 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 // entries unrefreshed this long are pruned on save
 const cacheMaxAge = 90 * 24 * time.Hour
+
+type LinkState struct {
+	URL          string
+	Class        classify.Class
+	Status       int
+	ETag         string
+	LastModified string
+	CheckedAt    time.Time
+	Fails        int
+	Successes    int
+}
 
 // fileCache backs incremental re-scans: a gzipped JSON map of link states.
 type fileCache struct {

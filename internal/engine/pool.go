@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 // checkPool runs link checks with per-item retry timers: a retryable item
@@ -101,7 +103,7 @@ func (p *checkPool) worker() {
 			continue
 		}
 
-		p.e.checkedOne(it.res.verdict.Class == ClassDead || it.res.verdict.Class == ClassSoft404)
+		p.e.checkedOne(it.res.verdict.Class == classify.ClassDead || it.res.verdict.Class == classify.ClassSoft404)
 		p.mu.Lock()
 		p.pending--
 		if p.pending == 0 && p.noMore {

@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/esosaoh/dodo/internal/fetch"
+	"github.com/esosaoh/dodo/internal/scheduler"
 )
 
 // robots gates the crawl phase only: verifying a link is a single
@@ -42,8 +45,8 @@ func (r *robotsCache) allowed(ctx context.Context, scheme, host, path string) bo
 		if err := r.e.sched.Acquire(ctx, host); err != nil {
 			return
 		}
-		fr := r.e.fetcher.Fetch(ctx, key+"/robots.txt", FetchOpts{WantBody: true, AnyContentType: true})
-		fb, ra := feedbackFor(fr)
+		fr := r.e.fetcher.Fetch(ctx, key+"/robots.txt", fetch.FetchOpts{WantBody: true, AnyContentType: true})
+		fb, ra := scheduler.FeedbackFor(fr)
 		r.e.sched.Release(host, fb, ra)
 		if fr.Err != nil || fr.Status != 200 || len(fr.Body) == 0 {
 			return // no robots.txt (or unreachable): allow everything

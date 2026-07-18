@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 func TestParseRobots(t *testing.T) {
@@ -85,7 +87,7 @@ func TestCrawlRespectsRobots(t *testing.T) {
 
 	// /private/page is still verified as a link (single fetch), but never
 	// crawled: its outgoing links must not appear.
-	if r := findResult(t, rep, srv.URL+"/private/page"); r.Class != ClassAlive {
+	if r := findResult(t, rep, srv.URL+"/private/page"); r.Class != classify.ClassAlive {
 		t.Errorf("/private/page should still be verified alive, got %s", r.Class)
 	}
 	for _, r := range rep.Results {

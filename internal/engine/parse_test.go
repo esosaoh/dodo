@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 func TestParsePageMalformedHrefs(t *testing.T) {
@@ -48,7 +50,7 @@ func TestMalformedHrefReported(t *testing.T) {
 	}
 
 	r := findResult(t, rep, "(https://oops.example/)")
-	if r.Class != ClassMalformed || r.Status != 0 {
+	if r.Class != classify.ClassMalformed || r.Status != 0 {
 		t.Errorf("got class=%s status=%d, want malformed with no fetch", r.Class, r.Status)
 	}
 	if len(r.Refs) != 1 || r.Refs[0].Text != "broken markdown" {

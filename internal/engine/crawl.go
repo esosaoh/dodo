@@ -6,6 +6,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
+	"github.com/esosaoh/dodo/internal/fetch"
+	"github.com/esosaoh/dodo/internal/scheduler"
 )
 
 type crawlItem struct {
@@ -14,7 +18,7 @@ type crawlItem struct {
 }
 
 type checked struct {
-	verdict      Verdict
+	verdict      classify.Verdict
 	status       int
 	finalURL     string
 	redirected   bool
@@ -129,11 +133,11 @@ func (c *crawler) process(ctx context.Context, item crawlItem) {
 		return
 	}
 	start := time.Now()
-	fr := c.e.fetcher.Fetch(ctx, item.url, FetchOpts{WantBody: true, BodyCap: c.e.cfg.PageBodyBytes})
-	fb, ra := feedbackFor(fr)
+	fr := c.e.fetcher.Fetch(ctx, item.url, fetch.FetchOpts{WantBody: true, BodyCap: c.e.cfg.PageBodyBytes})
+	fb, ra := scheduler.FeedbackFor(fr)
 	c.e.sched.Release(host, fb, ra)
 
-	verdict := Classify(fr)
+	verdict := classify.Classify(fr)
 	c.e.trace(host, start, time.Since(start), fr.Status, "crawl")
 	res := &checked{
 		verdict:    verdict,
@@ -154,7 +158,7 @@ func (c *crawler) process(ctx context.Context, item crawlItem) {
 	c.mu.Unlock()
 	c.e.emitCrawl(pages, c.reg.size())
 
-	if verdict.Class != ClassAlive || fr.Body == nil || !fr.IsHTML() {
+	if verdict.Class != classify.ClassAlive || fr.Body == nil || !fr.IsHTML() {
 		return
 	}
 

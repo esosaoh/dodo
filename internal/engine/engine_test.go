@@ -9,6 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/cache"
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 func html(w http.ResponseWriter, body string) {
@@ -123,23 +126,23 @@ func TestScanEndToEnd(t *testing.T) {
 		t.Errorf("pages crawled = %d, want 4", rep.PagesCrawled)
 	}
 
-	if r := findResult(t, rep, seed.URL+"/missing"); r.Class != ClassDead || r.Status != 404 {
+	if r := findResult(t, rep, seed.URL+"/missing"); r.Class != classify.ClassDead || r.Status != 404 {
 		t.Errorf("/missing: got class=%s status=%d, want dead/404", r.Class, r.Status)
 	}
-	if r := findResult(t, rep, ext.URL+"/gone"); r.Class != ClassDead {
+	if r := findResult(t, rep, ext.URL+"/gone"); r.Class != classify.ClassDead {
 		t.Errorf("ext /gone: got class=%s, want dead", r.Class)
 	}
-	if r := findResult(t, rep, ext.URL+"/ok"); r.Class != ClassAlive {
+	if r := findResult(t, rep, ext.URL+"/ok"); r.Class != classify.ClassAlive {
 		t.Errorf("ext /ok: got class=%s (%s), want alive", r.Class, r.Reason)
 	}
 
-	if r := findResult(t, rep, ext.URL+"/soft-thing"); r.Class != ClassSoft404 {
+	if r := findResult(t, rep, ext.URL+"/soft-thing"); r.Class != classify.ClassSoft404 {
 		t.Errorf("ext /soft-thing: got class=%s (%s), want soft_404", r.Class, r.Reason)
 	} else if r.Reason != "matches_404_fingerprint" {
 		t.Errorf("ext /soft-thing: reason=%s, want matches_404_fingerprint", r.Reason)
 	}
 
-	if r := findResult(t, rep, ext.URL+"/flaky"); r.Class != ClassAlive || r.Attempts != 2 {
+	if r := findResult(t, rep, ext.URL+"/flaky"); r.Class != classify.ClassAlive || r.Attempts != 2 {
 		t.Errorf("ext /flaky: got class=%s attempts=%d, want alive after 2 attempts", r.Class, r.Attempts)
 	}
 	if got := atomic.LoadInt32(flakyHits); got != 2 {
@@ -161,19 +164,19 @@ func TestScanEndToEnd(t *testing.T) {
 		t.Errorf("broken = %d, want at least 3 (missing, gone, soft-thing)", rep.Broken)
 	}
 	// Results must be sorted problems-first.
-	if len(rep.Results) > 0 && rep.Results[0].Class == ClassAlive && rep.Broken > 0 {
+	if len(rep.Results) > 0 && rep.Results[0].Class == classify.ClassAlive && rep.Broken > 0 {
 		t.Error("results are not sorted with problems first")
 	}
 }
 
 // memCache is a trivial in-memory StateCache for testing incremental scans.
 type memCache struct {
-	states map[string]*LinkState
+	states map[string]*cache.LinkState
 	puts   int
 }
 
-func (m *memCache) GetStates(_ context.Context, urls []string) (map[string]*LinkState, error) {
-	out := make(map[string]*LinkState)
+func (m *memCache) GetStates(_ context.Context, urls []string) (map[string]*cache.LinkState, error) {
+	out := make(map[string]*cache.LinkState)
 	for _, u := range urls {
 		if s, ok := m.states[u]; ok {
 			out[u] = s
@@ -182,7 +185,7 @@ func (m *memCache) GetStates(_ context.Context, urls []string) (map[string]*Link
 	return out, nil
 }
 
-func (m *memCache) PutStates(_ context.Context, states []*LinkState) error {
+func (m *memCache) PutStates(_ context.Context, states []*cache.LinkState) error {
 	m.puts++
 	for _, s := range states {
 		m.states[s.URL] = s
@@ -193,7 +196,7 @@ func (m *memCache) PutStates(_ context.Context, states []*LinkState) error {
 func TestIncrementalRescanSkipsFreshLinks(t *testing.T) {
 	ext, _ := newExtServer(t)
 	seed := newSeedServer(t, ext.URL)
-	cache := &memCache{states: make(map[string]*LinkState)}
+	cache := &memCache{states: make(map[string]*cache.LinkState)}
 
 	cfg := testConfig()
 	cfg.CheckFragments = false // fragment checks force re-fetching
@@ -249,7 +252,7 @@ func TestTimeoutLinksRetryOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := findResult(t, rep, slow.URL+"/slow")
-	if r.Class != ClassUnknown || r.Reason != "timeout" {
+	if r.Class != classify.ClassUnknown || r.Reason != "timeout" {
 		t.Errorf("got %s/%s, want unknown/timeout", r.Class, r.Reason)
 	}
 	if r.Attempts != 2 {

@@ -1,4 +1,4 @@
-package engine
+package fetch
 
 import (
 	"crypto/tls"
@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFetcherNegotiatesHTTP2(t *testing.T) {
@@ -18,7 +19,7 @@ func TestFetcherNegotiatesHTTP2(t *testing.T) {
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
-	f := NewFetcher(testConfig())
+	f := NewFetcher(5*time.Second, "dodo-test/1.0", 256<<10)
 	f.client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	fr := f.Fetch(t.Context(), srv.URL, FetchOpts{WantBody: true})

@@ -6,11 +6,16 @@ import (
 	"net/url"
 	"sort"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/cache"
+	"github.com/esosaoh/dodo/internal/classify"
+	"github.com/esosaoh/dodo/internal/fetch"
+	"github.com/esosaoh/dodo/internal/scheduler"
 )
 
 type verifyItem struct {
 	l     *link
-	state *LinkState
+	state *cache.LinkState
 	res   *checked
 	ids   map[string]struct{}
 	title string
@@ -32,8 +37,8 @@ func (e *Engine) attachState(ctx context.Context, it *verifyItem, needsFragBody 
 		return
 	}
 	needsBody := e.cfg.CheckFragments && needsFragBody
-	if st.Class == ClassAlive && !needsBody && time.Since(st.CheckedAt) < e.cfg.CacheTTL {
-		it.res.verdict = Verdict{Class: ClassAlive, Reason: "cached", Confidence: 0.9}
+	if st.Class == classify.ClassAlive && !needsBody && time.Since(st.CheckedAt) < e.cfg.CacheTTL {
+		it.res.verdict = classify.Verdict{Class: classify.ClassAlive, Reason: "cached", Confidence: 0.9}
 		it.res.status = st.Status
 		it.res.cached = true
 		return
@@ -41,7 +46,7 @@ func (e *Engine) attachState(ctx context.Context, it *verifyItem, needsFragBody 
 	it.state = st
 }
 
-func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*LinkState) {
+func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*cache.LinkState) {
 	if e.cfg.Soft404 {
 		e.retractSuspectSoft404s(items)
 	}
@@ -55,7 +60,7 @@ func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*Li
 	for _, l := range cr.reg.all() {
 		switch {
 		case l.malformed:
-			r := e.finalize(l, &checked{verdict: Verdict{Class: ClassMalformed, Reason: "unparseable_href", Confidence: 0.95}}, nil)
+			r := e.finalize(l, &checked{verdict: classify.Verdict{Class: classify.ClassMalformed, Reason: "unparseable_href", Confidence: 0.95}}, nil)
 			results = append(results, r)
 			e.checkedOne(true)
 		case cr.verified[l.url] != nil:
@@ -68,13 +73,13 @@ func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*Li
 		}
 	}
 
-	var states []*LinkState
+	var states []*cache.LinkState
 	now := time.Now()
 	for _, it := range items {
 		if it.res.cached || it.res.attempts == 0 {
 			continue
 		}
-		st := &LinkState{
+		st := &cache.LinkState{
 			URL:          it.l.url,
 			Class:        it.res.verdict.Class,
 			Status:       it.res.status,
@@ -91,7 +96,7 @@ func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*Li
 				st.LastModified = prev.LastModified
 			}
 		}
-		if st.Class == ClassAlive {
+		if st.Class == classify.ClassAlive {
 			st.Successes++
 		} else {
 			st.Fails++
@@ -110,7 +115,7 @@ func (e *Engine) retractSuspectSoft404s(items []*verifyItem) {
 		}
 		fp := e.prints.peek(schemeOf(it.l.url), hostOf(it.l.url))
 		if fp != nil && fp.suspect() {
-			it.res.verdict = Verdict{Class: ClassAlive, Reason: "host_template_suspected", Confidence: 0.6}
+			it.res.verdict = classify.Verdict{Class: classify.ClassAlive, Reason: "host_template_suspected", Confidence: 0.6}
 		}
 	}
 }
@@ -123,23 +128,23 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 	it.res.attempts++
 	host := hostOf(it.l.url)
 
-	if v, ok := e.health.trippedVerdict(host); ok {
+	if v, ok := e.health.TrippedVerdict(host); ok {
 		it.res.verdict = v
 		return false
 	}
 
 	if err := e.sched.Acquire(ctx, host); err != nil {
-		it.res.verdict = Verdict{Class: ClassUnknown, Reason: "cancelled", Confidence: 0}
+		it.res.verdict = classify.Verdict{Class: classify.ClassUnknown, Reason: "cancelled", Confidence: 0}
 		return false
 	}
 	// re-check after Acquire: the breaker may have tripped while we waited
 	// out a Retry-After pause
-	if v, ok := e.health.trippedVerdict(host); ok {
-		e.sched.Release(host, FeedbackNeutral, 0)
+	if v, ok := e.health.TrippedVerdict(host); ok {
+		e.sched.Release(host, scheduler.FeedbackNeutral, 0)
 		it.res.verdict = v
 		return false
 	}
-	opts := FetchOpts{WantBody: true}
+	opts := fetch.FetchOpts{WantBody: true}
 	if it.res.attempts > 1 {
 		// a retry that needs the full timeout twice is almost never coming
 		// back; spend half as long on it
@@ -151,12 +156,12 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 	}
 	start := time.Now()
 	fr := e.fetcher.Fetch(ctx, it.l.url, opts)
-	fb, ra := feedbackFor(fr)
+	fb, ra := scheduler.FeedbackFor(fr)
 	e.sched.Release(host, fb, ra)
 
-	v := Classify(fr)
+	v := classify.Classify(fr)
 	e.trace(host, start, time.Since(start), fr.Status, v.Reason)
-	e.health.record(host, fr.Err != nil, v)
+	e.health.Record(host, fr.Err != nil, v)
 	it.res.status = fr.Status
 	it.res.finalURL = fr.FinalURL
 	it.res.redirected = fr.Redirected
@@ -165,7 +170,7 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 		it.res.lastModified = fr.Header.Get("Last-Modified")
 	}
 
-	if v.Class == ClassAlive && fr.Status == 200 && fr.IsHTML() && len(fr.Body) > 0 {
+	if v.Class == classify.ClassAlive && fr.Status == 200 && fr.IsHTML() && len(fr.Body) > 0 {
 		if pd, err := ParsePage(bytes.NewReader(fr.Body), fr.FinalURL); err == nil {
 			it.ids = pd.IDs
 			it.title = pd.Title
@@ -173,14 +178,14 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 		if e.cfg.Soft404 {
 			fp := e.prints.forHost(ctx, schemeOf(it.l.url), host)
 			if fp.matches(fr.Body, it.l.url) {
-				v = Verdict{Class: ClassSoft404, Reason: "matches_404_fingerprint", Confidence: 0.85}
+				v = classify.Verdict{Class: classify.ClassSoft404, Reason: "matches_404_fingerprint", Confidence: 0.85}
 			} else if titleLooks404(it.title) {
-				v = Verdict{Class: ClassSoft404, Reason: "title_indicates_404", Confidence: 0.6}
+				v = classify.Verdict{Class: classify.ClassSoft404, Reason: "title_indicates_404", Confidence: 0.6}
 			}
 		}
 	}
 
-	if it.res.attempts > 1 && v.Class == ClassAlive {
+	if it.res.attempts > 1 && v.Class == classify.ClassAlive {
 		v.Reason = "flaky"
 		v.Confidence = 0.8
 	}
@@ -195,7 +200,7 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 }
 
 func (e *Engine) finalize(l *link, res *checked, ids map[string]struct{}) LinkResult {
-	v := FinalizeVerdict(res.verdict, res.attempts)
+	v := classify.FinalizeVerdict(res.verdict, res.attempts)
 	r := LinkResult{
 		URL:        l.url,
 		Internal:   l.internal,
@@ -210,7 +215,7 @@ func (e *Engine) finalize(l *link, res *checked, ids map[string]struct{}) LinkRe
 	if res.redirected {
 		r.FinalURL = res.finalURL
 	}
-	if e.cfg.CheckFragments && v.Class == ClassAlive && ids != nil {
+	if e.cfg.CheckFragments && v.Class == classify.ClassAlive && ids != nil {
 		var missing []string
 		for _, frag := range l.fragments() {
 			if frag == "top" { // browsers scroll to top for #top with no element

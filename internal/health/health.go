@@ -1,19 +1,21 @@
-package engine
+package health
 
 import (
 	"sync"
 	"time"
+
+	"github.com/esosaoh/dodo/internal/classify"
 )
 
 // rateLimitBudget: a host still 429ing this long after its first 429 (with
 // AIMD and Retry-After pauses already applied) won't be reasoned with.
 const rateLimitBudget = 20 * time.Second
 
-// hostHealth holds two per-host circuit breakers: one for hosts that stopped
+// HostHealth holds two per-host circuit breakers: one for hosts that stopped
 // answering (DNS/refused/timeout), one for hosts that keep refusing us
 // (403/999-style bot walls). Either way, once tripped the host's remaining
 // links inherit a verdict instead of costing a request each.
-type hostHealth struct {
+type HostHealth struct {
 	mu    sync.Mutex
 	hosts map[string]*hostState
 	limit int
@@ -26,27 +28,27 @@ type hostState struct {
 	first429      time.Time
 	budgetSpent   bool
 	tripped       bool
-	verdict       Verdict
+	verdict       classify.Verdict
 }
 
-func newHostHealth(limit int) *hostHealth {
-	return &hostHealth{hosts: make(map[string]*hostState), limit: limit, now: time.Now}
+func NewHostHealth(limit int) *HostHealth {
+	return &HostHealth{hosts: make(map[string]*hostState), limit: limit, now: time.Now}
 }
 
-func (h *hostHealth) trippedVerdict(host string) (Verdict, bool) {
+func (h *HostHealth) TrippedVerdict(host string) (classify.Verdict, bool) {
 	if h.limit <= 0 {
-		return Verdict{}, false
+		return classify.Verdict{}, false
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	st, ok := h.hosts[host]
 	if !ok || !st.tripped {
-		return Verdict{}, false
+		return classify.Verdict{}, false
 	}
 	return st.verdict, true
 }
 
-func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
+func (h *HostHealth) Record(host string, connectFailed bool, v classify.Verdict) {
 	if h.limit <= 0 {
 		return
 	}
@@ -63,14 +65,14 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 		// a connect failure doesn't reset the blocked streak: the host still
 		// isn't serving us
 		st.consecFails++
-	case v.Class == ClassBlocked && v.Retryable:
+	case v.Class == classify.ClassBlocked && v.Retryable:
 		if st.first429.IsZero() {
 			st.first429 = h.now()
 		} else if h.now().Sub(st.first429) > rateLimitBudget {
 			st.budgetSpent = true
 		}
 		st.consecFails = 0
-	case v.Class == ClassBlocked:
+	case v.Class == classify.ClassBlocked:
 		st.consecBlocked++
 		st.consecFails = 0
 	default:
@@ -84,14 +86,14 @@ func (h *hostHealth) record(host string, connectFailed bool, v Verdict) {
 	switch {
 	case st.consecFails >= h.limit:
 		st.tripped = true
-		v = FinalizeVerdict(v, 3)
+		v = classify.FinalizeVerdict(v, 3)
 		v.Reason = "host_unreachable"
 		st.verdict = v
 	case st.consecBlocked >= h.limit:
 		st.tripped = true
-		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_blocked", Confidence: 0.85}
+		st.verdict = classify.Verdict{Class: classify.ClassBlocked, Reason: "host_blocked", Confidence: 0.85}
 	case st.budgetSpent:
 		st.tripped = true
-		st.verdict = Verdict{Class: ClassBlocked, Reason: "host_rate_limited", Confidence: 0.7}
+		st.verdict = classify.Verdict{Class: classify.ClassBlocked, Reason: "host_rate_limited", Confidence: 0.7}
 	}
 }
