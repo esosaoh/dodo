@@ -33,6 +33,7 @@ func cmdCheck(args []string) {
 	fs.DurationVar(&cfg.CacheTTL, "cache-ttl", cfg.CacheTTL, "skip re-checking links verified healthy within this window")
 	noCache := fs.Bool("no-cache", false, "disable the local link-state cache")
 	jsonOut := fs.Bool("json", false, "emit the full report as JSON")
+	progressMode := fs.String("progress", "errors", "live stream verbosity: all, errors, none")
 	fs.Parse(args)
 
 	seed := fs.Arg(0)
@@ -44,6 +45,13 @@ func cmdCheck(args []string) {
 	// so `check <url> -depth 2` works too.
 	if fs.NArg() > 1 {
 		fs.Parse(fs.Args()[1:])
+	}
+
+	switch *progressMode {
+	case "all", "errors", "none":
+	default:
+		fmt.Fprintf(os.Stderr, "invalid -progress value %q (want all, errors, or none)\n", *progressMode)
+		os.Exit(2)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -58,9 +66,9 @@ func cmdCheck(args []string) {
 			fmt.Fprintf(os.Stderr, "warning: cache disabled: %v\n", err)
 		}
 	}
-	if !*jsonOut {
+	if !*jsonOut && *progressMode != "none" {
 		e.OnProgress = phasePrinter()
-		e.OnLinkChecked = linkPrinter()
+		e.OnLinkChecked = linkPrinter(*progressMode == "errors")
 	}
 
 	rep, err := e.Run(ctx, seed)
@@ -107,9 +115,12 @@ func phasePrinter() engine.ProgressFunc {
 
 // linkPrinter streams one line per crawled page or verified link as it
 // resolves, the way lychee and muffet do, instead of only an aggregate count.
-func linkPrinter() engine.LinkCheckedFunc {
+func linkPrinter(errorsOnly bool) engine.LinkCheckedFunc {
 	var mu sync.Mutex
 	return func(url string, class classify.Class, status int) {
+		if errorsOnly && class == classify.ClassAlive {
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		statusStr := "   "
