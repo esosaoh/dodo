@@ -118,6 +118,8 @@ func printReport(rep *engine.Report) {
 	}
 	fmt.Println()
 
+	printChanges(rep)
+
 	for _, cl := range classLabels {
 		var group []engine.LinkResult
 		for _, r := range rep.Results {
@@ -128,9 +130,9 @@ func printReport(rep *engine.Report) {
 		if len(group) == 0 {
 			continue
 		}
-		fmt.Printf("\n%s (%d):\n", cl.label, len(group))
+		fmt.Printf("\n%s (%d):\n", colorize(classColor[cl.class], cl.label), len(group))
 		for _, r := range group {
-			fmt.Printf("  ✗ %s\n", r.URL)
+			fmt.Printf("  %s %s\n", colorize(classColor[r.Class], "✗"), r.URL)
 			detail := fmt.Sprintf("    %s · confidence %.0f%%", r.Reason, r.Confidence*100)
 			if r.Status != 0 {
 				detail = fmt.Sprintf("    HTTP %d · %s · confidence %.0f%%", r.Status, r.Reason, r.Confidence*100)
@@ -156,9 +158,46 @@ func printReport(rep *engine.Report) {
 		printRefs(r.Refs)
 	}
 
-	fmt.Printf("\n✓ %d alive · ✗ %d broken · %d blocked · %d unknown\n",
-		rep.Counts[classify.ClassAlive], rep.Broken,
+	fmt.Printf("\n%s %d alive · %s %d broken · %d blocked · %d unknown\n",
+		colorize(colorGreen, "✓"), rep.Counts[classify.ClassAlive],
+		colorize(colorRed, "✗"), rep.Broken,
 		rep.Counts[classify.ClassBlocked], rep.Counts[classify.ClassUnknown])
+}
+
+func wasBroken(c classify.Class) bool {
+	return c == classify.ClassDead || c == classify.ClassSoft404 || c == classify.ClassMalformed
+}
+
+func printChanges(rep *engine.Report) {
+	var newBroken, fixed []engine.LinkResult
+	for _, r := range rep.Results {
+		if r.PrevClass == "" {
+			continue
+		}
+		switch prevBroken := wasBroken(r.PrevClass); {
+		case r.Broken() && !prevBroken:
+			newBroken = append(newBroken, r)
+		case !r.Broken() && prevBroken:
+			fixed = append(fixed, r)
+		}
+	}
+	if len(newBroken) == 0 && len(fixed) == 0 {
+		return
+	}
+
+	fmt.Println(colorize(colorBold, "\nSINCE LAST SCAN"))
+	if len(newBroken) > 0 {
+		fmt.Printf("  %s (%d):\n", colorize(colorRed, "newly broken"), len(newBroken))
+		for _, r := range newBroken {
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "✗"), r.URL, r.PrevClass)
+		}
+	}
+	if len(fixed) > 0 {
+		fmt.Printf("  %s (%d):\n", colorize(colorGreen, "fixed"), len(fixed))
+		for _, r := range fixed {
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✓"), r.URL, r.PrevClass)
+		}
+	}
 }
 
 func printRefs(refs []engine.Ref) {
