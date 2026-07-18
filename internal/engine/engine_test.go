@@ -185,7 +185,7 @@ func (m *memCache) GetStates(_ context.Context, urls []string) (map[string]*cach
 	return out, nil
 }
 
-func (m *memCache) PutStates(_ context.Context, states []*cache.LinkState) error {
+func (m *memCache) PutStates(_ context.Context, _ cache.ScanSummary, states []*cache.LinkState) error {
 	m.puts++
 	for _, s := range states {
 		m.states[s.URL] = s

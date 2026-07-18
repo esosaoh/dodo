@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/esosaoh/dodo/internal/cache"
 	"github.com/esosaoh/dodo/internal/classify"
 	"github.com/esosaoh/dodo/internal/fetch"
 	"github.com/esosaoh/dodo/internal/health"
@@ -112,10 +113,6 @@ func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {
 	items := pool.wait()
 	results, states := e.assemble(cr, items)
 
-	if e.Cache != nil && len(states) > 0 {
-		e.Cache.PutStates(context.WithoutCancel(ctx), states)
-	}
-
 	sort.Slice(results, func(i, j int) bool {
 		si, sj := classify.Severity(results[i].Class), classify.Severity(results[j].Class)
 		if si != sj {
@@ -141,6 +138,14 @@ func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {
 	rep.TotalLinks = len(links)
 	rep.FinishedAt = time.Now()
 	e.setPhase(PhaseDone)
+
+	if e.Cache != nil && len(states) > 0 {
+		summary := cache.ScanSummary{
+			Seed: rep.Seed, StartedAt: rep.StartedAt, FinishedAt: rep.FinishedAt,
+			PagesCrawled: rep.PagesCrawled, TotalLinks: rep.TotalLinks, Broken: rep.Broken,
+		}
+		e.Cache.PutStates(context.WithoutCancel(ctx), summary, states)
+	}
 	return rep, nil
 }
 

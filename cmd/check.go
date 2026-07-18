@@ -51,8 +51,9 @@ func cmdCheck(args []string) {
 
 	e := engine.NewEngine(cfg)
 	if !*noCache {
-		if fc, err := cache.NewFileCache(""); err == nil {
-			e.Cache = fc
+		if store, err := cache.Open(""); err == nil {
+			defer store.Close()
+			e.Cache = store
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: cache disabled: %v\n", err)
 		}

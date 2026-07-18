@@ -108,5 +108,5 @@ type ProgressFunc func(Progress)
 
 type StateCache interface {
 	GetStates(ctx context.Context, urls []string) (map[string]*cache.LinkState, error)
-	PutStates(ctx context.Context, states []*cache.LinkState) error
+	PutStates(ctx context.Context, scan cache.ScanSummary, states []*cache.LinkState) error
 }
