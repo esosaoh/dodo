@@ -17,7 +17,12 @@ const (
 	colorBold    = "\033[1m"
 )
 
-var colorEnabled = os.Getenv("NO_COLOR") == "" && isTerminal(os.Stdout)
+var (
+	noColorEnv     = os.Getenv("NO_COLOR") == ""
+	colorEnabled   = noColorEnv && isTerminal(os.Stdout)
+	stderrLive     = isTerminal(os.Stderr)
+	stderrColorize = noColorEnv && stderrLive
+)
 
 func isTerminal(f *os.File) bool {
 	info, err := f.Stat()
@@ -26,6 +31,13 @@ func isTerminal(f *os.File) bool {
 
 func colorize(code, s string) string {
 	if !colorEnabled {
+		return s
+	}
+	return code + s + colorReset
+}
+
+func colorizeErr(code, s string) string {
+	if !stderrColorize {
 		return s
 	}
 	return code + s + colorReset
