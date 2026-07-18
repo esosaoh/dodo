@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/PuerkitoBio/goquery"
 
 	"github.com/esosaoh/dodo/internal/fetch"
 	"github.com/esosaoh/dodo/internal/scheduler"
@@ -54,13 +57,22 @@ func (f *fingerprints) forHost(ctx context.Context, scheme, host string) *hostFP
 	return fp
 }
 
+// minWordsForFingerprint: pages with less extracted text than this (e.g. a
+// client-rendered shell whose only server-side content is "Loading...")
+// can't tell a soft 404 apart from real content, so they never establish or
+// match a fingerprint.
+const minWordsForFingerprint = 8
+
 func (fp *hostFP) probe(ctx context.Context, e *Engine, scheme, host string) {
 	url1 := scheme + "://" + host + "/" + randomSlug()
 	first := e.probeFetch(ctx, host, url1)
 	if first == nil || first.Status != 200 || first.Body == nil {
 		return // host 404s properly; no fingerprint needed
 	}
-	hash1 := simhashHTML(first.Body, pathTokens(url1))
+	hash1, words1 := simhashHTML(first.Body, pathTokens(url1))
+	if words1 < minWordsForFingerprint {
+		return // too little text to mean anything, e.g. a client-rendered shell
+	}
 
 	// Compare to a second garbage URL, not the homepage: hosts that redirect
 	// dead links home would otherwise falsely disable the fingerprint.
@@ -69,9 +81,34 @@ func (fp *hostFP) probe(ctx context.Context, e *Engine, scheme, host string) {
 	if second == nil || second.Status != 200 || second.Body == nil {
 		return
 	}
-	hash2 := simhashHTML(second.Body, pathTokens(url2))
+	hash2, words2 := simhashHTML(second.Body, pathTokens(url2))
+	if words2 < minWordsForFingerprint {
+		return
+	}
 	if hamming(hash1, hash2) > simhashThreshold {
 		return // inconsistent responses to unknown paths; no stable template
+	}
+
+	// A redirect to the site's own root is real evidence of a not-found
+	// pattern (dead links bounced home): the server recognized the fake
+	// path and still lives on this host. But a redirect to a *different*
+	// host entirely - discarding the original path - proves nothing: it
+	// means every path on this domain, real or fake, collapses to the same
+	// destination (a deprecated/consolidated domain), same as a client-
+	// rendered shell serving identical content for every path. Confirm
+	// against the homepage whenever we don't have that same-host-redirect
+	// evidence; if it matches too, nothing here is distinguishable.
+	sameHostRedirect := first.Redirected && second.Redirected &&
+		hostOf(first.FinalURL) == host && hostOf(second.FinalURL) == host
+	if !sameHostRedirect {
+		rootURL := scheme + "://" + host + "/"
+		root := e.probeFetch(ctx, host, rootURL)
+		if root != nil && root.Status == 200 && root.Body != nil {
+			rootHash, rootWords := simhashHTML(root.Body, pathTokens(rootURL))
+			if rootWords >= minWordsForFingerprint && hamming(rootHash, hash1) <= simhashThreshold {
+				return
+			}
+		}
 	}
 
 	fp.hash = hash1
@@ -82,7 +119,11 @@ func (fp *hostFP) matches(body []byte, linkURL string) bool {
 	if !fp.ok || len(body) == 0 {
 		return false
 	}
-	matched := hamming(simhashHTML(body, pathTokens(linkURL)), fp.hash) <= simhashThreshold
+	hash, words := simhashHTML(body, pathTokens(linkURL))
+	if words < minWordsForFingerprint {
+		return false // too little text on this page to compare meaningfully
+	}
+	matched := hamming(hash, fp.hash) <= simhashThreshold
 	fp.mu.Lock()
 	fp.checks++
 	if matched {
@@ -152,19 +193,38 @@ func titleLooks404(title string) bool {
 	return notFoundTitleRe.MatchString(title)
 }
 
+// mainText drops nav/header/footer/aside and their common ARIA-role
+// equivalents before extracting text, so template boilerplate shared by
+// every page on a site doesn't dominate the fingerprint over the part of
+// the page that's actually unique per URL.
+func mainText(body []byte) string {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	doc.Find(`script, style, nav, header, footer, aside, noscript, form, iframe,
+		[role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"]`).Remove()
+	return doc.Text()
+}
+
 // simhashHTML hashes 3-word shingles of visible text; similar templates land
 // within a few bits. Strip tokens (the URL's path words) and URL-ish words
-// are dropped so pages that echo the requested URL hash identically.
-func simhashHTML(body []byte, strip []string) uint64 {
-	text := scriptRe.ReplaceAllString(string(body), " ")
-	text = tagRe.ReplaceAllString(text, " ")
+// are dropped so pages that echo the requested URL hash identically. The
+// returned word count lets callers refuse to trust a hash built from too
+// little text (e.g. a client-rendered shell whose only text is "Loading...").
+func simhashHTML(body []byte, strip []string) (hash uint64, words int) {
+	text := mainText(body)
+	if text == "" {
+		text = scriptRe.ReplaceAllString(string(body), " ")
+		text = tagRe.ReplaceAllString(text, " ")
+	}
 	all := strings.Fields(strings.ToLower(text))
-	words := all[:0]
+	kept := all[:0]
 	for _, w := range all {
 		if strings.ContainsRune(w, '/') || containsAny(w, strip) {
 			continue
 		}
-		words = append(words, w)
+		kept = append(kept, w)
 	}
 
 	var vec [64]int
@@ -181,11 +241,11 @@ func simhashHTML(body []byte, strip []string) uint64 {
 		}
 	}
 
-	if len(words) < 3 {
-		addFeature(strings.Join(words, " "))
+	if len(kept) < 3 {
+		addFeature(strings.Join(kept, " "))
 	} else {
-		for i := 0; i+2 < len(words); i++ {
-			addFeature(words[i] + " " + words[i+1] + " " + words[i+2])
+		for i := 0; i+2 < len(kept); i++ {
+			addFeature(kept[i] + " " + kept[i+1] + " " + kept[i+2])
 		}
 	}
 
@@ -195,7 +255,7 @@ func simhashHTML(body []byte, strip []string) uint64 {
 			out |= 1 << uint(b)
 		}
 	}
-	return out
+	return out, len(kept)
 }
 
 func containsAny(w string, toks []string) bool {

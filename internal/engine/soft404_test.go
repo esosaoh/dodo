@@ -8,6 +8,97 @@ import (
 	"testing"
 )
 
+func TestFingerprintIgnoresThinShellContent(t *testing.T) {
+	// Both the garbage probes and a real, working page are just "Loading...",
+	// the way a client-rendered app route looks to a fetcher that can't run
+	// its JS (e.g. app.codecrafters.io) - there's no server-rendered text
+	// anywhere to distinguish real from fake, on the homepage or off it.
+	shell := `<html><head><title>App</title></head>
+<body><div id="root">Loading...</div><script src="/app.js"></script></body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html(w, shell)
+	}))
+	t.Cleanup(srv.Close)
+
+	e := NewEngine(testConfig())
+	fp := e.prints.forHost(context.Background(), "http", srv.Listener.Addr().String())
+	if fp.ok {
+		t.Fatal("expected no fingerprint when probe content is too thin to compare (e.g. a loading shell)")
+	}
+	if fp.matches([]byte(shell), "http://"+srv.Listener.Addr().String()+"/real/page") {
+		t.Error("a disabled fingerprint should never report a match")
+	}
+}
+
+func TestFingerprintIgnoresSharedNavAndFooter(t *testing.T) {
+	nav := `<nav>Home About Products Solutions Docs Documentation API Reference Pricing Plans
+Blog News Careers Jobs Contact Support Help Center Community Forum Status Changelog
+Enterprise Partners Resources Guides Tutorials Getting Started Download Sign In Sign Up
+Free Trial Demo Request Customers Case Studies Integrations Marketplace Security
+Compliance Terms Privacy Legal Cookies Sitemap Language English</nav>`
+	footer := `<footer>Copyright 2026 Acme Corp. All rights reserved. Terms of Service. Privacy Policy.
+Cookie Preferences. Follow us on Twitter, LinkedIn, GitHub, YouTube, and Facebook for
+product updates and announcements. Subscribe to our newsletter for the latest news.
+Made with love by the Acme team. Acme Corp is a registered trademark. Trust Center.
+Do Not Sell My Personal Information. Accessibility Statement. Site Map. Contact Sales.
+Investor Relations. Press Kit. Brand Guidelines. Open Source. Developer Portal.</footer>`
+	page := func(unique string) string {
+		return "<html><body>" + nav + "<main>" + unique + "</main>" + footer + "</body></html>"
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			html(w, page("Welcome to Acme Corp, maker of fine widgets and gadgets since 1998."))
+		case "/real-product-one":
+			html(w, page("Widget Pro is our flagship offering with advanced telemetry and reporting built in."))
+		case "/real-product-two":
+			html(w, page("The Gadget Max ships with a five year warranty and comes in three distinct colorways."))
+		default:
+			html(w, page("Sorry, we could not locate the page you were looking for on this site."))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	e := NewEngine(testConfig())
+	fp := e.prints.forHost(context.Background(), "http", srv.Listener.Addr().String())
+	if !fp.ok {
+		t.Fatal("expected a fingerprint for the genuine not-found template")
+	}
+
+	host := srv.Listener.Addr().String()
+	if fp.matches([]byte(page("Widget Pro is our flagship offering with advanced telemetry and reporting built in.")), "http://"+host+"/real-product-one") {
+		t.Error("a real product page shouldn't match the not-found fingerprint just because nav/footer boilerplate is shared")
+	}
+	if fp.matches([]byte(page("The Gadget Max ships with a five year warranty and comes in three distinct colorways.")), "http://"+host+"/real-product-two") {
+		t.Error("a real product page shouldn't match the not-found fingerprint just because nav/footer boilerplate is shared")
+	}
+}
+
+func TestFingerprintDisabledForCrossDomainRedirect(t *testing.T) {
+	// Simulates a deprecated domain (like consul.io) that 308-redirects
+	// every path, real or fake, to the same page on a different domain -
+	// discarding the original path entirely.
+	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html(w, `<html><head><title>Consul</title></head><body>
+The service mesh for multi-cloud and hybrid environments, with service
+discovery, health checking, and secure service-to-service communication.
+</body></html>`)
+	}))
+	t.Cleanup(dest.Close)
+
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, dest.URL, http.StatusPermanentRedirect)
+	}))
+	t.Cleanup(old.Close)
+
+	e := NewEngine(testConfig())
+	fp := e.prints.forHost(context.Background(), "http", old.Listener.Addr().String())
+	if fp.ok {
+		t.Fatal("expected no fingerprint when every path (including the homepage) redirects to a different domain")
+	}
+}
+
 func TestFingerprintSurvivesRedirectToHomepage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -34,6 +125,28 @@ and ships nationwide with a satisfaction guarantee on every order.
 </body></html>`)
 	if !fp.matches(deadPageBody, "http://"+srv.Listener.Addr().String()+"/vanished-resource") {
 		t.Error("expected the fingerprint to match a link that redirects to the same homepage content")
+	}
+}
+
+func TestFingerprintDisabledForClientRenderedShell(t *testing.T) {
+	// Every path, real or fake, gets the same shell - no redirect, direct
+	// 200 - the way a client-rendered SPA looks to a fetcher that can't run
+	// its JS (e.g. crates.io).
+	shell := `<html><head><title>crates.io: Rust Package Registry</title></head>
+<body><div id="main"></div><script src="/assets/app.js"></script></body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html(w, shell)
+	}))
+	t.Cleanup(srv.Close)
+
+	e := NewEngine(testConfig())
+	fp := e.prints.forHost(context.Background(), "http", srv.Listener.Addr().String())
+	if fp.ok {
+		t.Fatal("expected no fingerprint when the homepage matches the garbage probes too (client-rendered shell)")
+	}
+
+	if fp.matches([]byte(shell), "http://"+srv.Listener.Addr().String()+"/crates/rocket") {
+		t.Error("a disabled fingerprint should never report a match")
 	}
 }
 
@@ -65,7 +178,9 @@ temperatures dropping into the low fifties overnight across the region.
 func TestSimhashSimilarPages(t *testing.T) {
 	a := []byte(`<html><body>Sorry, we could not find the page you were looking for. Try searching below or return to the homepage. Error reference 8842.</body></html>`)
 	b := []byte(`<html><body>Sorry, we could not find the page you were looking for. Try searching below or return to the homepage. Error reference 1391.</body></html>`)
-	if d := hamming(simhashHTML(a, nil), simhashHTML(b, nil)); d > simhashThreshold {
+	ha, _ := simhashHTML(a, nil)
+	hb, _ := simhashHTML(b, nil)
+	if d := hamming(ha, hb); d > simhashThreshold {
 		t.Errorf("near-identical pages should be within threshold, distance=%d", d)
 	}
 }
@@ -73,15 +188,19 @@ func TestSimhashSimilarPages(t *testing.T) {
 func TestSimhashDifferentPages(t *testing.T) {
 	a := []byte(`<html><body>Sorry, we could not find the page you were looking for. Try searching below or return to the homepage.</body></html>`)
 	b := []byte(`<html><body>Welcome to our store. Browse thousands of products across electronics, clothing, books, and garden supplies with free shipping on qualified orders today.</body></html>`)
-	if d := hamming(simhashHTML(a, nil), simhashHTML(b, nil)); d <= simhashThreshold {
+	ha, _ := simhashHTML(a, nil)
+	hb, _ := simhashHTML(b, nil)
+	if d := hamming(ha, hb); d <= simhashThreshold {
 		t.Errorf("unrelated pages should exceed threshold, distance=%d", d)
 	}
 }
 
 func TestSimhashIgnoresScripts(t *testing.T) {
-	a := []byte(`<html><script>var x = 12345;</script><body>page not found anywhere</body></html>`)
-	b := []byte(`<html><script>var y = 99999; totally different code;</script><body>page not found anywhere</body></html>`)
-	if d := hamming(simhashHTML(a, nil), simhashHTML(b, nil)); d > simhashThreshold {
+	a := []byte(`<html><script>var x = 12345;</script><body>page not found anywhere with plenty of words to compare</body></html>`)
+	b := []byte(`<html><script>var y = 99999; totally different code;</script><body>page not found anywhere with plenty of words to compare</body></html>`)
+	ha, _ := simhashHTML(a, nil)
+	hb, _ := simhashHTML(b, nil)
+	if d := hamming(ha, hb); d > simhashThreshold {
 		t.Errorf("script content should not affect fingerprint, distance=%d", d)
 	}
 }
@@ -108,9 +227,9 @@ func TestSimhashStripsEchoedPathTokens(t *testing.T) {
 	probe := []byte(`<html><body>A perfectly healthy page with words about topic /dodo-probe-8f3a2c91</body></html>`)
 	link := []byte(`<html><body>A perfectly healthy page with words about topic /res/42</body></html>`)
 
-	rootHash := simhashHTML(root, pathTokens("http://x/"))
-	probeHash := simhashHTML(probe, pathTokens("http://x/dodo-probe-8f3a2c91"))
-	linkHash := simhashHTML(link, pathTokens("http://x/res/42"))
+	rootHash, _ := simhashHTML(root, pathTokens("http://x/"))
+	probeHash, _ := simhashHTML(probe, pathTokens("http://x/dodo-probe-8f3a2c91"))
+	linkHash, _ := simhashHTML(link, pathTokens("http://x/res/42"))
 
 	if d := hamming(rootHash, probeHash); d > simhashThreshold {
 		t.Errorf("echo host: root vs probe distance = %d, want within threshold", d)
@@ -137,7 +256,7 @@ func TestPathTokens(t *testing.T) {
 func TestFingerprintSuspectSafetyNet(t *testing.T) {
 	fp := &hostFP{ok: true}
 	body := []byte(`<html><body>the same template every single time on this host</body></html>`)
-	fp.hash = simhashHTML(body, nil)
+	fp.hash, _ = simhashHTML(body, nil)
 	for i := 0; i < 10; i++ {
 		fp.matches(body, "http://x/p")
 	}
