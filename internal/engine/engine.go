@@ -70,7 +70,7 @@ func (e *Engine) trace(host string, start time.Time, dur time.Duration, status i
 }
 
 func (e *Engine) Run(ctx context.Context, seed string) (*Report, error) {
-	seedURL, err := normalizeRawURL(seed)
+	seedURL, err := NormalizeURL(seed)
 	if err != nil {
 		return nil, err
 	}

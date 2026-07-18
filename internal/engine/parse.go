@@ -109,7 +109,9 @@ func normalizeURL(u *url.URL) string {
 	return c.String()
 }
 
-func normalizeRawURL(raw string) (string, error) {
+// NormalizeURL canonicalizes a loosely-typed URL (default scheme, lowercase
+// host, default port stripped) to the form dodo stores link states under.
+func NormalizeURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", err
