@@ -229,6 +229,67 @@ func TestIncrementalRescanSkipsFreshLinks(t *testing.T) {
 	}
 }
 
+func TestPrevClassTracksAcrossScans(t *testing.T) {
+	var extHits, subpageHits int32
+	ext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&extHits, 1) == 1 {
+			html(w, `<html><body>external page, alive on the first scan</body></html>`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(ext.Close)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
+		html(w, fmt.Sprintf(`<html><body>
+<a href="/subpage">subpage</a>
+<a href="%s">external</a>
+</body></html>`, ext.URL))
+	})
+	mux.HandleFunc("/subpage", func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&subpageHits, 1) == 1 {
+			html(w, `<html><body>internal subpage, alive on the first scan</body></html>`)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	seed := httptest.NewServer(mux)
+	t.Cleanup(seed.Close)
+
+	cache := &memCache{states: make(map[string]*cache.LinkState)}
+	cfg := testConfig()
+	cfg.Soft404 = false
+	cfg.CheckFragments = false
+	cfg.CacheTTL = 0 // force re-verification on the second scan instead of trusting the cache
+
+	e1 := NewEngine(cfg)
+	e1.Cache = cache
+	rep1, err := e1.Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := findResult(t, rep1, seed.URL+"/subpage"); r.Class != classify.ClassAlive || r.PrevClass != "" {
+		t.Errorf("first scan /subpage: class=%s prevClass=%q, want alive with no prior record", r.Class, r.PrevClass)
+	}
+	if r := findResult(t, rep1, ext.URL+"/"); r.Class != classify.ClassAlive || r.PrevClass != "" {
+		t.Errorf("first scan external: class=%s prevClass=%q, want alive with no prior record", r.Class, r.PrevClass)
+	}
+
+	e2 := NewEngine(cfg)
+	e2.Cache = cache
+	rep2, err := e2.Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := findResult(t, rep2, seed.URL+"/subpage"); r.Class != classify.ClassDead || r.PrevClass != classify.ClassAlive {
+		t.Errorf("second scan /subpage: class=%s prevClass=%s, want dead with prevClass alive", r.Class, r.PrevClass)
+	}
+	if r := findResult(t, rep2, ext.URL+"/"); r.Class != classify.ClassDead || r.PrevClass != classify.ClassAlive {
+		t.Errorf("second scan external: class=%s prevClass=%s, want dead with prevClass alive", r.Class, r.PrevClass)
+	}
+}
+
 func TestTimeoutLinksRetryOnlyOnce(t *testing.T) {
 	var hits int32
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

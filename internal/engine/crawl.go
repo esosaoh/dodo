@@ -26,6 +26,7 @@ type checked struct {
 	cached       bool
 	etag         string
 	lastModified string
+	prevClass    classify.Class
 }
 
 type crawler struct {
@@ -145,6 +146,7 @@ func (c *crawler) process(ctx context.Context, item crawlItem) {
 		finalURL:   fr.FinalURL,
 		redirected: fr.Redirected,
 		attempts:   1,
+		prevClass:  c.e.prevClassOf(ctx, item.url),
 	}
 	if fr.Err == nil {
 		res.etag = fr.Header.Get("Etag")

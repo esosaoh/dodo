@@ -36,14 +36,29 @@ func (e *Engine) attachState(ctx context.Context, it *verifyItem, needsFragBody 
 	if st == nil {
 		return
 	}
+	it.state = st
 	needsBody := e.cfg.CheckFragments && needsFragBody
 	if st.Class == classify.ClassAlive && !needsBody && time.Since(st.CheckedAt) < e.cfg.CacheTTL {
 		it.res.verdict = classify.Verdict{Class: classify.ClassAlive, Reason: "cached", Confidence: 0.9}
 		it.res.status = st.Status
 		it.res.cached = true
-		return
 	}
-	it.state = st
+}
+
+// prevClassOf is attachState's read-only counterpart for crawled pages, which
+// always re-fetch and so never short-circuit.
+func (e *Engine) prevClassOf(ctx context.Context, url string) classify.Class {
+	if e.Cache == nil {
+		return ""
+	}
+	states, err := e.Cache.GetStates(ctx, []string{url})
+	if err != nil {
+		return ""
+	}
+	if st := states[url]; st != nil {
+		return st.Class
+	}
+	return ""
 }
 
 func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*cache.LinkState) {
@@ -64,12 +79,18 @@ func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*ca
 			results = append(results, r)
 			e.checkedOne(true)
 		case cr.verified[l.url] != nil:
-			r := e.finalize(l, cr.verified[l.url], cr.pageIDs[l.url])
+			res := cr.verified[l.url]
+			r := e.finalize(l, res, cr.pageIDs[l.url])
+			r.PrevClass = res.prevClass
 			results = append(results, r)
 			e.checkedOne(r.Broken())
 		case byURL[l.url] != nil:
 			it := byURL[l.url]
-			results = append(results, e.finalize(it.l, it.res, it.ids))
+			r := e.finalize(it.l, it.res, it.ids)
+			if it.state != nil {
+				r.PrevClass = it.state.Class
+			}
+			results = append(results, r)
 		}
 	}
 
@@ -100,6 +121,22 @@ func (e *Engine) assemble(cr *crawler, items []*verifyItem) ([]LinkResult, []*ca
 			st.Successes++
 		} else {
 			st.Fails++
+		}
+		states = append(states, st)
+	}
+	for url, res := range cr.verified {
+		st := &cache.LinkState{
+			URL:          url,
+			Class:        res.verdict.Class,
+			Status:       res.status,
+			ETag:         res.etag,
+			LastModified: res.lastModified,
+			CheckedAt:    now,
+		}
+		if st.Class == classify.ClassAlive {
+			st.Successes = 1
+		} else {
+			st.Fails = 1
 		}
 		states = append(states, st)
 	}
