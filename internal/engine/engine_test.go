@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -166,6 +167,35 @@ func TestScanEndToEnd(t *testing.T) {
 	// Results must be sorted problems-first.
 	if len(rep.Results) > 0 && rep.Results[0].Class == classify.ClassAlive && rep.Broken > 0 {
 		t.Error("results are not sorted with problems first")
+	}
+}
+
+func TestSoft404NotAssertedLiveBeforeRetraction(t *testing.T) {
+	ext, _ := newExtServer(t)
+	seed := newSeedServer(t, ext.URL)
+
+	var streamed sync.Map
+	e := NewEngine(testConfig())
+	e.OnLinkChecked = func(url string, class classify.Class, status int) {
+		streamed.Store(url, class)
+	}
+
+	rep, err := e.Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := findResult(t, rep, ext.URL+"/soft-thing")
+	if r.Class != classify.ClassSoft404 || r.Reason != "matches_404_fingerprint" {
+		t.Fatalf("precondition: expected soft-thing to end up soft_404/matches_404_fingerprint in the final report, got %s/%s", r.Class, r.Reason)
+	}
+
+	v, ok := streamed.Load(ext.URL + "/soft-thing")
+	if !ok {
+		t.Fatal("expected soft-thing to have streamed live")
+	}
+	if v.(classify.Class) != classify.ClassAlive {
+		t.Errorf("streamed class = %s, want alive (a fingerprint match isn't trustworthy until retraction runs at the end of the scan)", v)
 	}
 }
 

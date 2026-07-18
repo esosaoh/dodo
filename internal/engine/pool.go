@@ -105,8 +105,15 @@ func (p *checkPool) worker() {
 
 		class := it.res.verdict.Class
 		p.e.checkedOne(class, class == classify.ClassDead || class == classify.ClassSoft404)
+		// a fingerprint match is only trustworthy after retractSuspectSoft404s
+		// cross-checks it against the rest of the scan, at the very end -
+		// stream it as alive for now; the final report reflects the real verdict.
 		if p.e.OnLinkChecked != nil {
-			p.e.OnLinkChecked(it.l.url, class, it.res.status)
+			streamClass := class
+			if it.res.verdict.Reason == "matches_404_fingerprint" {
+				streamClass = classify.ClassAlive
+			}
+			p.e.OnLinkChecked(it.l.url, streamClass, it.res.status)
 		}
 		p.mu.Lock()
 		p.pending--
