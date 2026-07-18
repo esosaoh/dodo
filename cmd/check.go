@@ -59,7 +59,8 @@ func cmdCheck(args []string) {
 		}
 	}
 	if !*jsonOut {
-		e.OnProgress = progressPrinter()
+		e.OnProgress = phasePrinter()
+		e.OnLinkChecked = linkPrinter()
 	}
 
 	rep, err := e.Run(ctx, seed)
@@ -83,62 +84,51 @@ func cmdCheck(args []string) {
 	}
 }
 
-func progressPrinter() engine.ProgressFunc {
+// phasePrinter announces each phase once, like a section header for the
+// stream of per-link lines that follows.
+func phasePrinter() engine.ProgressFunc {
 	var mu sync.Mutex
-	var last time.Time
-	var linesPrinted int
-	throttle := 150 * time.Millisecond
-	if !stderrLive {
-		throttle = 2 * time.Second // plain log lines: don't flood the output
-	}
-
+	var last engine.Phase
 	return func(p engine.Progress) {
 		mu.Lock()
 		defer mu.Unlock()
-		if p.Phase != engine.PhaseDone && time.Since(last) < throttle {
+		if p.Phase == last {
 			return
 		}
-		last = time.Now()
-		lines := progressLines(p)
-
-		if !stderrLive {
-			for _, line := range lines {
-				fmt.Fprintln(os.Stderr, line)
-			}
-			return
+		last = p.Phase
+		switch p.Phase {
+		case engine.PhaseCrawl:
+			fmt.Fprintln(os.Stderr, "Crawling...")
+		case engine.PhaseVerify:
+			fmt.Fprintln(os.Stderr, "\nVerifying links...")
 		}
-		if linesPrinted > 0 {
-			fmt.Fprintf(os.Stderr, "\033[%dA", linesPrinted)
-		}
-		for _, line := range lines {
-			fmt.Fprintf(os.Stderr, "\033[2K%s\n", line)
-		}
-		linesPrinted = len(lines)
 	}
 }
 
-func progressLines(p engine.Progress) []string {
-	if p.Phase == engine.PhaseCrawl {
-		return []string{fmt.Sprintf("Crawling: %d pages, %d links found", p.PagesCrawled, p.LinksFound)}
-	}
-	pct := 0
-	if p.LinksTotal > 0 {
-		pct = 100 * p.LinksChecked / p.LinksTotal
-	}
-	return []string{
-		fmt.Sprintf("Verifying %s %3d%%  %d/%d links",
-			progressBar(p.LinksChecked, p.LinksTotal, 24), pct, p.LinksChecked, p.LinksTotal),
-		fmt.Sprintf("  %s %d alive   %s %d broken   %d blocked",
-			colorizeErr(colorGreen, "✓"), p.Alive, colorizeErr(colorRed, "✗"), p.Broken, p.Blocked),
+// linkPrinter streams one line per crawled page or verified link as it
+// resolves, the way lychee and muffet do, instead of only an aggregate count.
+func linkPrinter() engine.LinkCheckedFunc {
+	var mu sync.Mutex
+	return func(url string, class classify.Class, status int) {
+		mu.Lock()
+		defer mu.Unlock()
+		statusStr := "   "
+		if status != 0 {
+			statusStr = fmt.Sprintf("%3d", status)
+		}
+		fmt.Fprintf(os.Stderr, "%s %s  %s\n", colorizeErr(classColor[class], linkMark(class)), statusStr, url)
 	}
 }
 
-func progressBar(current, total, width int) string {
-	if total <= 0 {
-		return strings.Repeat("░", width)
+func linkMark(c classify.Class) string {
+	switch c {
+	case classify.ClassAlive:
+		return "✓"
+	case classify.ClassBlocked, classify.ClassUnknown:
+		return "⚠"
+	default:
+		return "✗"
 	}
-	filled := min(width*current/total, width)
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
 var classLabels = []struct {

@@ -105,6 +105,9 @@ func (p *checkPool) worker() {
 
 		class := it.res.verdict.Class
 		p.e.checkedOne(class, class == classify.ClassDead || class == classify.ClassSoft404)
+		if p.e.OnLinkChecked != nil {
+			p.e.OnLinkChecked(it.l.url, class, it.res.status)
+		}
 		p.mu.Lock()
 		p.pending--
 		if p.pending == 0 && p.noMore {

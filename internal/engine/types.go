@@ -108,6 +108,10 @@ type Progress struct {
 
 type ProgressFunc func(Progress)
 
+// LinkCheckedFunc fires once per crawled page or verified link, so callers
+// can stream results live instead of only seeing aggregate counts.
+type LinkCheckedFunc func(url string, class classify.Class, status int)
+
 type StateCache interface {
 	GetStates(ctx context.Context, urls []string) (map[string]*cache.LinkState, error)
 	PutStates(ctx context.Context, scan cache.ScanSummary, states []*cache.LinkState) error

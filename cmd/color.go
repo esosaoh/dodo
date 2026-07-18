@@ -20,8 +20,7 @@ const (
 var (
 	noColorEnv     = os.Getenv("NO_COLOR") == ""
 	colorEnabled   = noColorEnv && isTerminal(os.Stdout)
-	stderrLive     = isTerminal(os.Stderr)
-	stderrColorize = noColorEnv && stderrLive
+	stderrColorize = noColorEnv && isTerminal(os.Stderr)
 )
 
 func isTerminal(f *os.File) bool {

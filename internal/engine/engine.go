@@ -25,8 +25,9 @@ type Engine struct {
 	robots  *robotsCache
 
 	// optional; set before Run
-	Cache      StateCache
-	OnProgress ProgressFunc
+	Cache         StateCache
+	OnProgress    ProgressFunc
+	OnLinkChecked LinkCheckedFunc
 
 	progMu sync.Mutex
 	prog   Progress
