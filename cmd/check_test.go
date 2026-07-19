@@ -142,6 +142,28 @@ func TestHardBrokenCountExcludesErroring(t *testing.T) {
 	}
 }
 
+func TestStatusLinePrinterErasesAndRenders(t *testing.T) {
+	render, clear := statusLinePrinter()
+
+	prevStderr := os.Stderr
+	t.Cleanup(func() { os.Stderr = prevStderr })
+
+	out := captureStdout(t, func() {
+		os.Stderr = os.Stdout // captureStdout only swaps os.Stdout; alias stderr into it
+		render(engine.Progress{Phase: engine.PhaseVerify, LinksChecked: 3, LinksTotal: 10, Alive: 2, Broken: 1})
+		clear()
+	})
+	if !strings.HasPrefix(out, "\r\033[2K") {
+		t.Errorf("expected the render to start with a carriage-return + clear-line escape, got:\n%q", out)
+	}
+	if !strings.Contains(out, "3/10") || !strings.Contains(out, "1 broken") {
+		t.Errorf("expected the status line to show progress counts, got:\n%q", out)
+	}
+	if !strings.HasSuffix(out, "\r\033[2K") {
+		t.Errorf("expected clear() to erase the line afterward, got:\n%q", out)
+	}
+}
+
 func TestPrintRefsShortensSameHostPages(t *testing.T) {
 	prevColor := colorEnabled
 	colorEnabled = false

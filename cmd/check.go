@@ -48,7 +48,6 @@ func runCheck(args []string) int {
 		return 2
 	}
 	// flag stops at the first positional arg; re-parse anything after the URL
-	// so `check <url> -depth 2` works too.
 	if fs.NArg() > 1 {
 		fs.Parse(fs.Args()[1:])
 	}
@@ -72,12 +71,22 @@ func runCheck(args []string) int {
 			fmt.Fprintf(os.Stderr, "warning: cache disabled: %v\n", err)
 		}
 	}
+	var clearStatus func()
 	if !*jsonOut && *progressMode != "none" {
-		e.OnProgress = phasePrinter()
-		e.OnLinkChecked = linkPrinter(*progressMode == "errors")
+		if *progressMode == "errors" && isTerminal(os.Stderr) {
+			render, clear := statusLinePrinter()
+			e.OnProgress = render
+			clearStatus = clear
+		} else {
+			e.OnProgress = phasePrinter()
+			e.OnLinkChecked = linkPrinter(*progressMode == "errors")
+		}
 	}
 
 	rep, err := e.Run(ctx, seed)
+	if clearStatus != nil {
+		clearStatus()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
@@ -99,9 +108,7 @@ func runCheck(args []string) int {
 	return 0
 }
 
-// hardBrokenCount excludes ERRORING (transient-reason dead) results:
-// they're explicitly hedged as "may be transient" and shouldn't fail CI
-// on their own.
+// hardBrokenCount excludes ERRORING (transient-reason dead) results
 func hardBrokenCount(rep *engine.Report) int {
 	n := 0
 	for _, r := range rep.Results {
@@ -129,6 +136,30 @@ func phasePrinter() engine.ProgressFunc {
 			fmt.Fprintln(os.Stderr, "\nVerifying links...")
 		}
 	}
+}
+
+func statusLinePrinter() (render engine.ProgressFunc, clear func()) {
+	var mu sync.Mutex
+	render = func(p engine.Progress) {
+		mu.Lock()
+		defer mu.Unlock()
+		var line string
+		switch p.Phase {
+		case engine.PhaseCrawl:
+			line = fmt.Sprintf("Crawling...  %d pages · %d links found", p.PagesCrawled, p.LinksFound)
+		case engine.PhaseVerify:
+			line = fmt.Sprintf("Verifying...  %d/%d checked · %d alive · %d broken", p.LinksChecked, p.LinksTotal, p.Alive, p.Broken)
+		default:
+			return
+		}
+		fmt.Fprintf(os.Stderr, "\r\033[2K%s", line)
+	}
+	clear = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprint(os.Stderr, "\r\033[2K")
+	}
+	return render, clear
 }
 
 func linkPrinter(errorsOnly bool) engine.LinkCheckedFunc {
@@ -161,8 +192,6 @@ func linkMark(c classify.Class) string {
 	}
 }
 
-// BLOCKED gets a rollup instead (printBlockedRollup): nobody acts on an
-// individual blocked stackoverflow/HN link.
 var classLabels = []struct {
 	class classify.Class
 	label string
@@ -249,8 +278,6 @@ func printResultDetail(r engine.LinkResult, seedHost string) {
 	fmt.Println(line)
 }
 
-// isTransientReason: a single bad response shouldn't read the same as a
-// permanently dead link - these flip back and forth across scans.
 func isTransientReason(reason string) bool {
 	return reason == "server_error" || reason == "connection_refused"
 }
@@ -355,8 +382,6 @@ func classLabel(c classify.Class) string {
 	return string(c)
 }
 
-// refsSummary compacts every referencing page into one "(/a, /b, +2 more)"
-// clause instead of a line per ref - anchor text stays in -json only.
 func refsSummary(refs []engine.Ref, seedHost string) string {
 	seen := make(map[string]bool)
 	var pages []string
@@ -381,8 +406,6 @@ func refsSummary(refs []engine.Ref, seedHost string) string {
 	return strings.Join(pages, ", ")
 }
 
-// refPageLabel keeps the hyperlink target as the full URL even when the
-// displayed text is shortened to a same-host path.
 func refPageLabel(page, seedHost string) string {
 	display := page
 	if hostOfURL(page) == seedHost {
