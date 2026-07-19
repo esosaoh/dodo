@@ -89,7 +89,7 @@ func TestPrintRefsDedupesTrailingSlash(t *testing.T) {
 		{Page: "https://endler.dev/2022/readable/", Text: "readability"},
 		{Page: "https://endler.dev/2022/readable", Text: "readability"},
 	}
-	out := captureStdout(t, func() { printRefs(refs, "endler.dev") })
+	out := refsSummary(refs, "endler.dev")
 	if strings.Count(out, "readable") != 1 {
 		t.Errorf("expected the trailing-slash variant to be deduped into one ref, got:\n%s", out)
 	}
@@ -127,8 +127,8 @@ func TestPrintRefsShortensSameHostPages(t *testing.T) {
 	t.Cleanup(func() { colorEnabled = prevColor })
 
 	refs := []engine.Ref{{Page: "https://endler.dev/2020/folklore/", Text: "story"}}
-	out := captureStdout(t, func() { printRefs(refs, "endler.dev") })
-	if !strings.Contains(out, "on /2020/folklore/") {
+	out := refsSummary(refs, "endler.dev")
+	if !strings.Contains(out, "/2020/folklore/") {
 		t.Errorf("expected a same-host ref to be shortened to its path, got:\n%s", out)
 	}
 	if strings.Contains(out, "https://endler.dev") {

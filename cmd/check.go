@@ -208,22 +208,27 @@ func printReport(rep *engine.Report) {
 			fmt.Println("\nMISSING ANCHORS (page is alive, #fragment target missing):")
 		}
 		fragIssues++
-		fmt.Printf("  ⚠ %s — missing: #%s\n", hyperlink(r.URL), strings.Join(r.MissingFragments, ", #"))
-		printRefs(r.Refs, seedHost)
+		line := fmt.Sprintf("  ⚠ %s — missing: #%s", hyperlink(r.URL), strings.Join(r.MissingFragments, ", #"))
+		if refs := refsSummary(r.Refs, seedHost); refs != "" {
+			line += "  (" + refs + ")"
+		}
+		fmt.Println(line)
 	}
 }
 
 func printResultDetail(r engine.LinkResult, seedHost string) {
-	fmt.Printf("  %s %s\n", colorize(classColor[r.Class], linkMark(r.Class)), hyperlink(r.URL))
-	detail := "    " + r.Reason
+	reason := r.Reason
 	if r.Status != 0 {
-		detail = fmt.Sprintf("    HTTP %d · %s", r.Status, r.Reason)
+		reason = fmt.Sprintf("%d %s", r.Status, r.Reason)
 	}
 	if r.Attempts > 1 {
-		detail += fmt.Sprintf(" · %d attempts", r.Attempts)
+		reason += fmt.Sprintf(", %d attempts", r.Attempts)
 	}
-	fmt.Println(detail)
-	printRefs(r.Refs, seedHost)
+	line := fmt.Sprintf("  %s %s  %s", colorize(classColor[r.Class], linkMark(r.Class)), hyperlink(r.URL), reason)
+	if refs := refsSummary(r.Refs, seedHost); refs != "" {
+		line += "  (" + refs + ")"
+	}
+	fmt.Println(line)
 }
 
 // isTransientReason: a single bad response shouldn't read the same as a
@@ -323,46 +328,43 @@ func classLabel(c classify.Class) string {
 	return string(c)
 }
 
-func printRefs(refs []engine.Ref, seedHost string) {
-	type refKey struct{ page, text string }
-	seen := make(map[refKey]bool)
-	var deduped []engine.Ref
+// refsSummary compacts every referencing page into one "(/a, /b, +2 more)"
+// clause instead of a line per ref - anchor text stays in -json only.
+func refsSummary(refs []engine.Ref, seedHost string) string {
+	seen := make(map[string]bool)
+	var pages []string
 	for _, ref := range refs {
 		if ref.Page == "" {
 			continue
 		}
-		key := refKey{strings.TrimSuffix(ref.Page, "/"), ref.Text}
+		key := strings.TrimSuffix(ref.Page, "/")
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		deduped = append(deduped, ref)
+		pages = append(pages, refPageLabel(ref.Page, seedHost))
 	}
-
-	for i, ref := range deduped {
-		if i == 3 {
-			fmt.Printf("      … and %d more\n", len(deduped)-i)
-			return
-		}
-		fmt.Println("      on " + refLabel(ref, seedHost))
+	if len(pages) == 0 {
+		return ""
 	}
+	const maxShown = 2
+	if len(pages) > maxShown {
+		return strings.Join(pages[:maxShown], ", ") + fmt.Sprintf(", +%d more", len(pages)-maxShown)
+	}
+	return strings.Join(pages, ", ")
 }
 
-// refLabel keeps the hyperlink target as the full URL even when the
+// refPageLabel keeps the hyperlink target as the full URL even when the
 // displayed text is shortened to a same-host path.
-func refLabel(ref engine.Ref, seedHost string) string {
-	display := ref.Page
-	if hostOfURL(ref.Page) == seedHost {
-		if u, err := url.Parse(ref.Page); err == nil {
+func refPageLabel(page, seedHost string) string {
+	display := page
+	if hostOfURL(page) == seedHost {
+		if u, err := url.Parse(page); err == nil {
 			display = u.RequestURI()
 			if u.Fragment != "" {
 				display += "#" + u.Fragment
 			}
 		}
 	}
-	label := hyperlinkAs(ref.Page, display)
-	if ref.Text != "" {
-		label += fmt.Sprintf(" (%q)", ref.Text)
-	}
-	return label
+	return hyperlinkAs(page, display)
 }
