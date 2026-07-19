@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -176,7 +177,7 @@ func TestSoft404NotAssertedLiveBeforeRetraction(t *testing.T) {
 
 	var streamed sync.Map
 	e := NewEngine(testConfig())
-	e.OnLinkChecked = func(url string, class classify.Class, status int) {
+	e.OnLinkChecked = func(url string, class classify.Class, status int, reason string) {
 		streamed.Store(url, class)
 	}
 
@@ -317,6 +318,67 @@ func TestPrevClassTracksAcrossScans(t *testing.T) {
 	}
 	if r := findResult(t, rep2, ext.URL+"/"); r.Class != classify.ClassDead || r.PrevClass != classify.ClassAlive {
 		t.Errorf("second scan external: class=%s prevClass=%s, want dead with prevClass alive", r.Class, r.PrevClass)
+	}
+}
+
+func TestSoft404PrevClassSurvivesRealCache(t *testing.T) {
+	var toggle int32
+	ext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/":
+			html(w, `<html><head><title>Home</title></head><body>
+Welcome to the real external site with genuine homepage content about many
+different topics, products and services offered here.
+</body></html>`)
+		case r.URL.Path == "/soft-thing" && atomic.LoadInt32(&toggle) == 1:
+			html(w, `<html><head><title>Real Article</title></head><body>
+This is a real article with genuinely distinct content about an interesting
+and specific subject matter, unrelated to anything else on this site.
+</body></html>`)
+		default:
+			html(w, softPage)
+		}
+	}))
+	t.Cleanup(ext.Close)
+
+	seed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html(w, fmt.Sprintf(`<html><body><a href="%s/soft-thing">thing</a></body></html>`, ext.URL))
+	}))
+	t.Cleanup(seed.Close)
+
+	store, err := cache.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cfg := testConfig()
+	cfg.CacheTTL = 0
+
+	e1 := NewEngine(cfg)
+	e1.Cache = store
+	rep1, err := e1.Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r1 := findResult(t, rep1, ext.URL+"/soft-thing")
+	if r1.Class != classify.ClassSoft404 {
+		t.Fatalf("precondition: first scan should classify as soft_404, got %s (%s)", r1.Class, r1.Reason)
+	}
+
+	atomic.StoreInt32(&toggle, 1)
+	e2 := NewEngine(cfg)
+	e2.Cache = store
+	rep2, err := e2.Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := findResult(t, rep2, ext.URL+"/soft-thing")
+	if r2.Class != classify.ClassAlive {
+		t.Fatalf("second scan should be fixed (alive), got %s (%s)", r2.Class, r2.Reason)
+	}
+	if r2.PrevClass != classify.ClassSoft404 {
+		t.Errorf("PrevClass = %q, want soft_404 - this is the exact bug reported: fixed soft-404s vanish from the diff", r2.PrevClass)
 	}
 }
 

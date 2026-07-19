@@ -153,7 +153,7 @@ func (c *crawler) process(ctx context.Context, item crawlItem) {
 		res.lastModified = fr.Header.Get("Last-Modified")
 	}
 	if c.e.OnLinkChecked != nil {
-		c.e.OnLinkChecked(item.url, verdict.Class, fr.Status)
+		c.e.OnLinkChecked(item.url, verdict.Class, fr.Status, verdict.Reason)
 	}
 
 	c.mu.Lock()

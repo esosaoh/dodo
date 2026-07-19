@@ -109,11 +109,11 @@ func (p *checkPool) worker() {
 		// cross-checks it against the rest of the scan, at the very end -
 		// stream it as alive for now; the final report reflects the real verdict.
 		if p.e.OnLinkChecked != nil {
-			streamClass := class
-			if it.res.verdict.Reason == "matches_404_fingerprint" {
-				streamClass = classify.ClassAlive
+			streamClass, streamReason := class, it.res.verdict.Reason
+			if streamReason == "matches_404_fingerprint" {
+				streamClass, streamReason = classify.ClassAlive, ""
 			}
-			p.e.OnLinkChecked(it.l.url, streamClass, it.res.status)
+			p.e.OnLinkChecked(it.l.url, streamClass, it.res.status, streamReason)
 		}
 		p.mu.Lock()
 		p.pending--

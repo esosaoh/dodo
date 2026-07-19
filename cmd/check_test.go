@@ -51,6 +51,22 @@ func TestPrintChangesShowsNewAndFixed(t *testing.T) {
 	}
 }
 
+func TestPrintChangesExcludesTransientErrorsFromNewlyBroken(t *testing.T) {
+	rep := &engine.Report{
+		Results: []engine.LinkResult{
+			{URL: "https://flaky.example/", Class: classify.ClassDead, Reason: "server_error", PrevClass: classify.ClassAlive},
+			{URL: "https://gone.example/", Class: classify.ClassDead, Reason: "not_found", PrevClass: classify.ClassAlive},
+		},
+	}
+	out := captureStdout(t, func() { printChanges(rep) })
+	if strings.Contains(out, "flaky.example") {
+		t.Errorf("a transient server_error shouldn't be reported as newly broken, got:\n%s", out)
+	}
+	if !strings.Contains(out, "gone.example") {
+		t.Errorf("a genuine not_found should still be reported as newly broken, got:\n%s", out)
+	}
+}
+
 func TestPrintChangesSkipsWhenNothingChanged(t *testing.T) {
 	rep := &engine.Report{
 		Results: []engine.LinkResult{
@@ -76,6 +92,32 @@ func TestPrintRefsDedupesTrailingSlash(t *testing.T) {
 	out := captureStdout(t, func() { printRefs(refs, "endler.dev") })
 	if strings.Count(out, "readable") != 1 {
 		t.Errorf("expected the trailing-slash variant to be deduped into one ref, got:\n%s", out)
+	}
+}
+
+func TestPrintReportSeparatesErroringFromDead(t *testing.T) {
+	prevColor := colorEnabled
+	colorEnabled = false
+	t.Cleanup(func() { colorEnabled = prevColor })
+
+	rep := &engine.Report{
+		Seed: "https://seed.example/",
+		Results: []engine.LinkResult{
+			{URL: "https://flaky.example/", Class: classify.ClassDead, Reason: "server_error", Attempts: 3},
+			{URL: "https://gone.example/", Class: classify.ClassDead, Reason: "not_found"},
+		},
+	}
+	out := captureStdout(t, func() { printReport(rep) })
+	if !strings.Contains(out, "ERRORING") || !strings.Contains(out, "flaky.example") {
+		t.Errorf("expected the server_error result under an ERRORING section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "DEAD (1)") {
+		t.Errorf("expected DEAD to only count the genuine not_found result, got:\n%s", out)
+	}
+	deadIdx := strings.Index(out, "DEAD (1)")
+	erroringIdx := strings.Index(out, "ERRORING")
+	if deadIdx == -1 || erroringIdx == -1 || strings.Contains(out[deadIdx:erroringIdx], "flaky.example") {
+		t.Errorf("flaky.example should not appear under DEAD, got:\n%s", out)
 	}
 }
 

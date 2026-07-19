@@ -115,15 +115,18 @@ func phasePrinter() engine.ProgressFunc {
 
 func linkPrinter(errorsOnly bool) engine.LinkCheckedFunc {
 	var mu sync.Mutex
-	return func(url string, class classify.Class, status int) {
+	return func(url string, class classify.Class, status int, reason string) {
 		if errorsOnly && class == classify.ClassAlive {
 			return
 		}
 		mu.Lock()
 		defer mu.Unlock()
 		statusStr := "   "
-		if status != 0 {
+		switch {
+		case status != 0:
 			statusStr = fmt.Sprintf("%3d", status)
+		case reason != "":
+			statusStr = reason
 		}
 		fmt.Fprintf(os.Stderr, "%s %s  %s\n", colorizeErr(classColor[class], linkMark(class)), statusStr, hyperlinkErr(url))
 	}
@@ -165,28 +168,32 @@ func printReport(rep *engine.Report) {
 	printChanges(rep)
 
 	seedHost := hostOfURL(rep.Seed)
+	var erroring []engine.LinkResult
 	for _, cl := range classLabels {
 		var group []engine.LinkResult
 		for _, r := range rep.Results {
-			if r.Class == cl.class {
-				group = append(group, r)
+			if r.Class != cl.class {
+				continue
 			}
+			if cl.class == classify.ClassDead && isTransientReason(r.Reason) {
+				erroring = append(erroring, r)
+				continue
+			}
+			group = append(group, r)
 		}
 		if len(group) == 0 {
 			continue
 		}
 		fmt.Printf("\n%s (%d):\n", colorize(classColor[cl.class], cl.label), len(group))
 		for _, r := range group {
-			fmt.Printf("  %s %s\n", colorize(classColor[r.Class], linkMark(r.Class)), hyperlink(r.URL))
-			detail := "    " + r.Reason
-			if r.Status != 0 {
-				detail = fmt.Sprintf("    HTTP %d · %s", r.Status, r.Reason)
-			}
-			if r.Attempts > 1 {
-				detail += fmt.Sprintf(" · %d attempts", r.Attempts)
-			}
-			fmt.Println(detail)
-			printRefs(r.Refs, seedHost)
+			printResultDetail(r, seedHost)
+		}
+	}
+
+	if len(erroring) > 0 {
+		fmt.Printf("\n%s (%d, may be transient):\n", colorize(colorYellow, "ERRORING"), len(erroring))
+		for _, r := range erroring {
+			printResultDetail(r, seedHost)
 		}
 	}
 
@@ -204,6 +211,25 @@ func printReport(rep *engine.Report) {
 		fmt.Printf("  ⚠ %s — missing: #%s\n", hyperlink(r.URL), strings.Join(r.MissingFragments, ", #"))
 		printRefs(r.Refs, seedHost)
 	}
+}
+
+func printResultDetail(r engine.LinkResult, seedHost string) {
+	fmt.Printf("  %s %s\n", colorize(classColor[r.Class], linkMark(r.Class)), hyperlink(r.URL))
+	detail := "    " + r.Reason
+	if r.Status != 0 {
+		detail = fmt.Sprintf("    HTTP %d · %s", r.Status, r.Reason)
+	}
+	if r.Attempts > 1 {
+		detail += fmt.Sprintf(" · %d attempts", r.Attempts)
+	}
+	fmt.Println(detail)
+	printRefs(r.Refs, seedHost)
+}
+
+// isTransientReason: a single bad response shouldn't read the same as a
+// permanently dead link - these flip back and forth across scans.
+func isTransientReason(reason string) bool {
+	return reason == "server_error" || reason == "connection_refused"
 }
 
 func printSummary(rep *engine.Report) {
@@ -265,7 +291,7 @@ func printChanges(rep *engine.Report) {
 			continue
 		}
 		switch prevBroken := wasBroken(r.PrevClass); {
-		case r.Broken() && !prevBroken:
+		case r.Broken() && !prevBroken && !isTransientReason(r.Reason):
 			newBroken = append(newBroken, r)
 		case !r.Broken() && prevBroken:
 			fixed = append(fixed, r)
@@ -279,15 +305,22 @@ func printChanges(rep *engine.Report) {
 	if len(newBroken) > 0 {
 		fmt.Printf("  %s (%d):\n", colorize(colorRed, "newly broken"), len(newBroken))
 		for _, r := range newBroken {
-			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "✗"), hyperlink(r.URL), r.PrevClass)
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "✗"), hyperlink(r.URL), classLabel(r.PrevClass))
 		}
 	}
 	if len(fixed) > 0 {
 		fmt.Printf("  %s (%d):\n", colorize(colorGreen, "fixed"), len(fixed))
 		for _, r := range fixed {
-			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✓"), hyperlink(r.URL), r.PrevClass)
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✓"), hyperlink(r.URL), classLabel(r.PrevClass))
 		}
 	}
+}
+
+func classLabel(c classify.Class) string {
+	if c == classify.ClassSoft404 {
+		return "soft 404"
+	}
+	return string(c)
 }
 
 func printRefs(refs []engine.Ref, seedHost string) {
