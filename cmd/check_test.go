@@ -121,6 +121,27 @@ func TestPrintReportSeparatesErroringFromDead(t *testing.T) {
 	}
 }
 
+func TestHardBrokenCountExcludesErroring(t *testing.T) {
+	rep := &engine.Report{
+		Results: []engine.LinkResult{
+			{URL: "https://flaky.example/", Class: classify.ClassDead, Reason: "server_error"},
+			{URL: "https://gone.example/", Class: classify.ClassDead, Reason: "not_found"},
+		},
+	}
+	if n := hardBrokenCount(rep); n != 1 {
+		t.Errorf("hardBrokenCount = %d, want 1 (only the genuine not_found)", n)
+	}
+
+	onlyErroring := &engine.Report{
+		Results: []engine.LinkResult{
+			{URL: "https://flaky.example/", Class: classify.ClassDead, Reason: "server_error"},
+		},
+	}
+	if n := hardBrokenCount(onlyErroring); n != 0 {
+		t.Errorf("hardBrokenCount = %d, want 0 - a transient error alone shouldn't fail CI", n)
+	}
+}
+
 func TestPrintRefsShortensSameHostPages(t *testing.T) {
 	prevColor := colorEnabled
 	colorEnabled = false

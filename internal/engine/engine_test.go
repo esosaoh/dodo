@@ -382,6 +382,84 @@ and specific subject matter, unrelated to anything else on this site.
 	}
 }
 
+// PrevClass must track title-based soft-404 correctly across scans too, not
+// just fingerprint-based ones - this is a different classification path
+// with its own reason string.
+func TestOscillatingTitleSoft404AcrossScans(t *testing.T) {
+	var state int32 // 0=alive, 1=soft404-by-title
+	ext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/thing" {
+			// probe/garbage target: distinct from both /thing variants below,
+			// so the fingerprint never matches - isolates the title heuristic
+			html(w, `<html><head><title>Unrelated Probe Shell</title></head><body>
+Completely unrelated boilerplate text used only for garbage probe responses.
+</body></html>`)
+			return
+		}
+		if atomic.LoadInt32(&state) == 0 {
+			html(w, `<html><head><title>Real Article</title></head><body>
+Genuine distinct content about a specific and interesting subject matter here.
+</body></html>`)
+		} else {
+			html(w, `<html><head><title>404 Not Found - meme page</title></head><body>
+This page is genuinely about the 404 meme itself and has plenty of real words.
+</body></html>`)
+		}
+	}))
+	t.Cleanup(ext.Close)
+
+	seed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		html(w, fmt.Sprintf(`<html><body><a href="%s/thing">thing</a></body></html>`, ext.URL))
+	}))
+	t.Cleanup(seed.Close)
+
+	store, err := cache.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cfg := testConfig()
+	cfg.CacheTTL = 0
+
+	run := func(n int, wantClass classify.Class) LinkResult {
+		e := NewEngine(cfg)
+		e.Cache = store
+		rep, err := e.Run(context.Background(), seed.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := findResult(t, rep, ext.URL+"/thing")
+		if r.Class != wantClass {
+			t.Fatalf("scan %d: class=%s reason=%s, want %s", n, r.Class, r.Reason, wantClass)
+		}
+		return *r
+	}
+
+	r1 := run(1, classify.ClassAlive)
+	if r1.PrevClass != "" {
+		t.Errorf("scan 1: prevClass=%q, want empty (no prior record)", r1.PrevClass)
+	}
+
+	atomic.StoreInt32(&state, 1)
+	r2 := run(2, classify.ClassSoft404)
+	if r2.PrevClass != classify.ClassAlive {
+		t.Errorf("scan 2: prevClass=%q, want alive", r2.PrevClass)
+	}
+
+	atomic.StoreInt32(&state, 0)
+	r3 := run(3, classify.ClassAlive)
+	if r3.PrevClass != classify.ClassSoft404 {
+		t.Errorf("scan 3: prevClass=%q, want soft_404", r3.PrevClass)
+	}
+
+	atomic.StoreInt32(&state, 1)
+	r4 := run(4, classify.ClassSoft404)
+	if r4.PrevClass != classify.ClassAlive {
+		t.Errorf("scan 4: prevClass=%q, want alive", r4.PrevClass)
+	}
+}
+
 func TestTimeoutLinksRetryOnlyOnce(t *testing.T) {
 	var hits int32
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

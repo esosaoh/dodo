@@ -20,6 +20,10 @@ import (
 )
 
 func cmdCheck(args []string) {
+	os.Exit(runCheck(args))
+}
+
+func runCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	cfg := engine.DefaultConfig()
 	fs.IntVar(&cfg.MaxDepth, "depth", cfg.MaxDepth, "max crawl depth on the seed site")
@@ -41,7 +45,7 @@ func cmdCheck(args []string) {
 	seed := fs.Arg(0)
 	if seed == "" {
 		fmt.Fprintln(os.Stderr, "usage: dodo check <url> [flags]")
-		os.Exit(2)
+		return 2
 	}
 	// flag stops at the first positional arg; re-parse anything after the URL
 	// so `check <url> -depth 2` works too.
@@ -53,7 +57,7 @@ func cmdCheck(args []string) {
 	case "all", "errors", "none":
 	default:
 		fmt.Fprintf(os.Stderr, "invalid -progress value %q (want all, errors, or none)\n", *progressMode)
-		os.Exit(2)
+		return 2
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -76,7 +80,7 @@ func cmdCheck(args []string) {
 	rep, err := e.Run(ctx, seed)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	if !*jsonOut {
 		fmt.Fprintln(os.Stderr)
@@ -89,9 +93,23 @@ func cmdCheck(args []string) {
 	} else {
 		printReport(rep)
 	}
-	if rep.Broken > 0 {
-		os.Exit(1)
+	if hardBrokenCount(rep) > 0 {
+		return 1
 	}
+	return 0
+}
+
+// hardBrokenCount excludes ERRORING (transient-reason dead) results:
+// they're explicitly hedged as "may be transient" and shouldn't fail CI
+// on their own.
+func hardBrokenCount(rep *engine.Report) int {
+	n := 0
+	for _, r := range rep.Results {
+		if r.Broken() && !(r.Class == classify.ClassDead && isTransientReason(r.Reason)) {
+			n++
+		}
+	}
+	return n
 }
 
 func phasePrinter() engine.ProgressFunc {
@@ -238,10 +256,19 @@ func isTransientReason(reason string) bool {
 }
 
 func printSummary(rep *engine.Report) {
-	fmt.Printf("%s %d alive · %s %d broken · %d blocked · %d unknown\n",
+	erroring := 0
+	for _, r := range rep.Results {
+		if r.Class == classify.ClassDead && isTransientReason(r.Reason) {
+			erroring++
+		}
+	}
+	fmt.Printf("%s %d alive · %s %d broken",
 		colorize(colorGreen, "✓"), rep.Counts[classify.ClassAlive],
-		colorize(colorRed, "✗"), rep.Broken,
-		rep.Counts[classify.ClassBlocked], rep.Counts[classify.ClassUnknown])
+		colorize(colorRed, "✗"), hardBrokenCount(rep))
+	if erroring > 0 {
+		fmt.Printf(" · %d erroring", erroring)
+	}
+	fmt.Printf(" · %d blocked · %d unknown\n", rep.Counts[classify.ClassBlocked], rep.Counts[classify.ClassUnknown])
 }
 
 func printBlockedRollup(rep *engine.Report) {

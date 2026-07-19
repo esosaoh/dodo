@@ -26,7 +26,7 @@ type LinkResult struct {
 	Cached           bool           `json:"cached,omitempty"`
 	MissingFragments []string       `json:"missing_fragments,omitempty"`
 	Refs             []Ref          `json:"refs"`
-	PrevClass classify.Class `json:"prev_class,omitempty"`
+	PrevClass        classify.Class `json:"prev_class,omitempty"`
 }
 
 func (r *LinkResult) Broken() bool {
