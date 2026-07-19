@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -92,8 +94,6 @@ func cmdCheck(args []string) {
 	}
 }
 
-// phasePrinter announces each phase once, like a section header for the
-// stream of per-link lines that follows.
 func phasePrinter() engine.ProgressFunc {
 	var mu sync.Mutex
 	var last engine.Phase
@@ -113,8 +113,6 @@ func phasePrinter() engine.ProgressFunc {
 	}
 }
 
-// linkPrinter streams one line per crawled page or verified link as it
-// resolves, the way lychee and muffet do, instead of only an aggregate count.
 func linkPrinter(errorsOnly bool) engine.LinkCheckedFunc {
 	var mu sync.Mutex
 	return func(url string, class classify.Class, status int) {
@@ -127,7 +125,7 @@ func linkPrinter(errorsOnly bool) engine.LinkCheckedFunc {
 		if status != 0 {
 			statusStr = fmt.Sprintf("%3d", status)
 		}
-		fmt.Fprintf(os.Stderr, "%s %s  %s\n", colorizeErr(classColor[class], linkMark(class)), statusStr, url)
+		fmt.Fprintf(os.Stderr, "%s %s  %s\n", colorizeErr(classColor[class], linkMark(class)), statusStr, hyperlinkErr(url))
 	}
 }
 
@@ -142,6 +140,8 @@ func linkMark(c classify.Class) string {
 	}
 }
 
+// BLOCKED gets a rollup instead (printBlockedRollup): nobody acts on an
+// individual blocked stackoverflow/HN link.
 var classLabels = []struct {
 	class classify.Class
 	label string
@@ -149,7 +149,6 @@ var classLabels = []struct {
 	{classify.ClassDead, "DEAD"},
 	{classify.ClassSoft404, "SOFT 404"},
 	{classify.ClassMalformed, "MALFORMED (invalid href on page)"},
-	{classify.ClassBlocked, "BLOCKED (could not verify: bot protection / auth)"},
 	{classify.ClassUnknown, "UNKNOWN"},
 }
 
@@ -161,9 +160,11 @@ func printReport(rep *engine.Report) {
 		fmt.Printf(" (%d from cache)", rep.Cached)
 	}
 	fmt.Println()
+	printSummary(rep)
 
 	printChanges(rep)
 
+	seedHost := hostOfURL(rep.Seed)
 	for _, cl := range classLabels {
 		var group []engine.LinkResult
 		for _, r := range rep.Results {
@@ -176,18 +177,20 @@ func printReport(rep *engine.Report) {
 		}
 		fmt.Printf("\n%s (%d):\n", colorize(classColor[cl.class], cl.label), len(group))
 		for _, r := range group {
-			fmt.Printf("  %s %s\n", colorize(classColor[r.Class], "✗"), r.URL)
-			detail := fmt.Sprintf("    %s · confidence %.0f%%", r.Reason, r.Confidence*100)
+			fmt.Printf("  %s %s\n", colorize(classColor[r.Class], linkMark(r.Class)), hyperlink(r.URL))
+			detail := "    " + r.Reason
 			if r.Status != 0 {
-				detail = fmt.Sprintf("    HTTP %d · %s · confidence %.0f%%", r.Status, r.Reason, r.Confidence*100)
+				detail = fmt.Sprintf("    HTTP %d · %s", r.Status, r.Reason)
 			}
 			if r.Attempts > 1 {
 				detail += fmt.Sprintf(" · %d attempts", r.Attempts)
 			}
 			fmt.Println(detail)
-			printRefs(r.Refs)
+			printRefs(r.Refs, seedHost)
 		}
 	}
+
+	printBlockedRollup(rep)
 
 	fragIssues := 0
 	for _, r := range rep.Results {
@@ -198,14 +201,57 @@ func printReport(rep *engine.Report) {
 			fmt.Println("\nMISSING ANCHORS (page is alive, #fragment target missing):")
 		}
 		fragIssues++
-		fmt.Printf("  ⚠ %s — missing: #%s\n", r.URL, strings.Join(r.MissingFragments, ", #"))
-		printRefs(r.Refs)
+		fmt.Printf("  ⚠ %s — missing: #%s\n", hyperlink(r.URL), strings.Join(r.MissingFragments, ", #"))
+		printRefs(r.Refs, seedHost)
 	}
+}
 
-	fmt.Printf("\n%s %d alive · %s %d broken · %d blocked · %d unknown\n",
+func printSummary(rep *engine.Report) {
+	fmt.Printf("%s %d alive · %s %d broken · %d blocked · %d unknown\n",
 		colorize(colorGreen, "✓"), rep.Counts[classify.ClassAlive],
 		colorize(colorRed, "✗"), rep.Broken,
 		rep.Counts[classify.ClassBlocked], rep.Counts[classify.ClassUnknown])
+}
+
+func printBlockedRollup(rep *engine.Report) {
+	counts := make(map[string]int)
+	total := 0
+	for _, r := range rep.Results {
+		if r.Class != classify.ClassBlocked {
+			continue
+		}
+		counts[hostOfURL(r.URL)]++
+		total++
+	}
+	if total == 0 {
+		return
+	}
+
+	type hostCount struct {
+		host  string
+		count int
+	}
+	hosts := make([]hostCount, 0, len(counts))
+	for h, c := range counts {
+		hosts = append(hosts, hostCount{h, c})
+	}
+	sort.Slice(hosts, func(i, j int) bool { return hosts[i].count > hosts[j].count })
+
+	fmt.Printf("\n%s (%d links on %d hosts — could not verify, not counted as broken):\n  ",
+		colorize(classColor[classify.ClassBlocked], "BLOCKED"), total, len(hosts))
+	parts := make([]string, len(hosts))
+	for i, h := range hosts {
+		parts[i] = fmt.Sprintf("%s (%d)", h.host, h.count)
+	}
+	fmt.Println(strings.Join(parts, " · "))
+}
+
+func hostOfURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return u.Host
 }
 
 func wasBroken(c classify.Class) bool {
@@ -233,32 +279,57 @@ func printChanges(rep *engine.Report) {
 	if len(newBroken) > 0 {
 		fmt.Printf("  %s (%d):\n", colorize(colorRed, "newly broken"), len(newBroken))
 		for _, r := range newBroken {
-			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "✗"), r.URL, r.PrevClass)
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "✗"), hyperlink(r.URL), r.PrevClass)
 		}
 	}
 	if len(fixed) > 0 {
 		fmt.Printf("  %s (%d):\n", colorize(colorGreen, "fixed"), len(fixed))
 		for _, r := range fixed {
-			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✓"), r.URL, r.PrevClass)
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✓"), hyperlink(r.URL), r.PrevClass)
 		}
 	}
 }
 
-func printRefs(refs []engine.Ref) {
-	shown := 0
+func printRefs(refs []engine.Ref, seedHost string) {
+	type refKey struct{ page, text string }
+	seen := make(map[refKey]bool)
+	var deduped []engine.Ref
 	for _, ref := range refs {
 		if ref.Page == "" {
 			continue
 		}
-		if shown == 3 {
-			fmt.Printf("      … and %d more\n", len(refs)-shown)
+		key := refKey{strings.TrimSuffix(ref.Page, "/"), ref.Text}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		deduped = append(deduped, ref)
+	}
+
+	for i, ref := range deduped {
+		if i == 3 {
+			fmt.Printf("      … and %d more\n", len(deduped)-i)
 			return
 		}
-		line := "      on " + ref.Page
-		if ref.Text != "" {
-			line += fmt.Sprintf(" (%q)", ref.Text)
-		}
-		fmt.Println(line)
-		shown++
+		fmt.Println("      on " + refLabel(ref, seedHost))
 	}
+}
+
+// refLabel keeps the hyperlink target as the full URL even when the
+// displayed text is shortened to a same-host path.
+func refLabel(ref engine.Ref, seedHost string) string {
+	display := ref.Page
+	if hostOfURL(ref.Page) == seedHost {
+		if u, err := url.Parse(ref.Page); err == nil {
+			display = u.RequestURI()
+			if u.Fragment != "" {
+				display += "#" + u.Fragment
+			}
+		}
+	}
+	label := hyperlinkAs(ref.Page, display)
+	if ref.Text != "" {
+		label += fmt.Sprintf(" (%q)", ref.Text)
+	}
+	return label
 }

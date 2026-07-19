@@ -9,10 +9,7 @@ import (
 )
 
 func TestFingerprintIgnoresThinShellContent(t *testing.T) {
-	// Both the garbage probes and a real, working page are just "Loading...",
-	// the way a client-rendered app route looks to a fetcher that can't run
-	// its JS (e.g. app.codecrafters.io) - there's no server-rendered text
-	// anywhere to distinguish real from fake, on the homepage or off it.
+	// mirrors app.codecrafters.io: garbage and real pages are both "Loading..."
 	shell := `<html><head><title>App</title></head>
 <body><div id="root">Loading...</div><script src="/app.js"></script></body></html>`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -76,9 +73,7 @@ Investor Relations. Press Kit. Brand Guidelines. Open Source. Developer Portal.<
 }
 
 func TestFingerprintDisabledForCrossDomainRedirect(t *testing.T) {
-	// Simulates a deprecated domain (like consul.io) that 308-redirects
-	// every path, real or fake, to the same page on a different domain -
-	// discarding the original path entirely.
+	// mirrors consul.io: every path 308s to the same page on another domain
 	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		html(w, `<html><head><title>Consul</title></head><body>
 The service mesh for multi-cloud and hybrid environments, with service
@@ -129,9 +124,7 @@ and ships nationwide with a satisfaction guarantee on every order.
 }
 
 func TestFingerprintDisabledForClientRenderedShell(t *testing.T) {
-	// Every path, real or fake, gets the same shell - no redirect, direct
-	// 200 - the way a client-rendered SPA looks to a fetcher that can't run
-	// its JS (e.g. crates.io).
+	// mirrors crates.io: every path gets the same shell directly, no redirect
 	shell := `<html><head><title>crates.io: Rust Package Registry</title></head>
 <body><div id="main"></div><script src="/assets/app.js"></script></body></html>`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

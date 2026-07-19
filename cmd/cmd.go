@@ -6,7 +6,6 @@ import (
 	"os"
 )
 
-// Execute dispatches os.Args to the right subcommand and exits the process.
 func Execute() {
 	if len(os.Args) < 2 {
 		usage()

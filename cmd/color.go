@@ -42,6 +42,25 @@ func colorizeErr(code, s string) string {
 	return code + s + colorReset
 }
 
+// unsupported terminals just render the display text as-is.
+func hyperlink(url string) string {
+	return hyperlinkAs(url, url)
+}
+
+func hyperlinkAs(target, display string) string {
+	if !colorEnabled {
+		return display
+	}
+	return "\033]8;;" + target + "\033\\" + display + "\033]8;;\033\\"
+}
+
+func hyperlinkErr(url string) string {
+	if !stderrColorize {
+		return url
+	}
+	return "\033]8;;" + url + "\033\\" + url + "\033]8;;\033\\"
+}
+
 var classColor = map[classify.Class]string{
 	classify.ClassDead:      colorRed,
 	classify.ClassSoft404:   colorMagenta,

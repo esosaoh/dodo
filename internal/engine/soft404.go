@@ -89,15 +89,10 @@ func (fp *hostFP) probe(ctx context.Context, e *Engine, scheme, host string) {
 		return // inconsistent responses to unknown paths; no stable template
 	}
 
-	// A redirect to the site's own root is real evidence of a not-found
-	// pattern (dead links bounced home): the server recognized the fake
-	// path and still lives on this host. But a redirect to a *different*
-	// host entirely - discarding the original path - proves nothing: it
-	// means every path on this domain, real or fake, collapses to the same
-	// destination (a deprecated/consolidated domain), same as a client-
-	// rendered shell serving identical content for every path. Confirm
-	// against the homepage whenever we don't have that same-host-redirect
-	// evidence; if it matches too, nothing here is distinguishable.
+	// A redirect to this host's own root is real evidence (dead links
+	// bounced home); a redirect elsewhere just means the domain collapses
+	// every path to one destination. Confirm against the homepage unless
+	// we already have same-host-redirect evidence.
 	sameHostRedirect := first.Redirected && second.Redirected &&
 		hostOf(first.FinalURL) == host && hostOf(second.FinalURL) == host
 	if !sameHostRedirect {
@@ -193,10 +188,8 @@ func titleLooks404(title string) bool {
 	return notFoundTitleRe.MatchString(title)
 }
 
-// mainText drops nav/header/footer/aside and their common ARIA-role
-// equivalents before extracting text, so template boilerplate shared by
-// every page on a site doesn't dominate the fingerprint over the part of
-// the page that's actually unique per URL.
+// mainText drops nav/header/footer/aside so boilerplate shared by every
+// page on a site doesn't dominate the fingerprint over what's unique per URL.
 func mainText(body []byte) string {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
@@ -208,10 +201,8 @@ func mainText(body []byte) string {
 }
 
 // simhashHTML hashes 3-word shingles of visible text; similar templates land
-// within a few bits. Strip tokens (the URL's path words) and URL-ish words
-// are dropped so pages that echo the requested URL hash identically. The
-// returned word count lets callers refuse to trust a hash built from too
-// little text (e.g. a client-rendered shell whose only text is "Loading...").
+// within a few bits. strip (the URL's path words) is dropped so pages that
+// echo the requested URL back hash identically.
 func simhashHTML(body []byte, strip []string) (hash uint64, words int) {
 	text := mainText(body)
 	if text == "" {

@@ -145,7 +145,6 @@ func looksBotProtected(r *fetch.FetchResult) bool {
 	return false
 }
 
-// FinalizeVerdict escalates a still-retryable verdict once retries are exhausted.
 func FinalizeVerdict(v Verdict, attempts int) Verdict {
 	if !v.Retryable {
 		return v

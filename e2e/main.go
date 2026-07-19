@@ -32,7 +32,6 @@ func main() {
 	}
 	deadL.Close() // guarantees connection refused on :9305
 
-	// ok host: everything 200 after 30ms
 	go func() {
 		log.Fatal(http.ListenAndServe("127.0.0.1:9302", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(30 * time.Millisecond)
@@ -40,7 +39,6 @@ func main() {
 		})))
 	}()
 
-	// soft host: /real/* fine, anything else (incl. /missing/*) is a 200 error page
 	go func() {
 		log.Fatal(http.ListenAndServe("127.0.0.1:9303", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(30 * time.Millisecond)
@@ -56,7 +54,6 @@ func main() {
 		})))
 	}()
 
-	// rate host: 429 above 4 concurrent requests
 	var inflight int64
 	go func() {
 		log.Fatal(http.ListenAndServe("127.0.0.1:9304", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +69,6 @@ func main() {
 		})))
 	}()
 
-	// main site
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Millisecond)
