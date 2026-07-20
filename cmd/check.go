@@ -131,9 +131,9 @@ func phasePrinter() engine.ProgressFunc {
 		last = p.Phase
 		switch p.Phase {
 		case engine.PhaseCrawl:
-			fmt.Fprintln(os.Stderr, "Crawling...")
+			fmt.Fprintln(os.Stderr, "🦤 Crawling...")
 		case engine.PhaseVerify:
-			fmt.Fprintln(os.Stderr, "\nVerifying links...")
+			fmt.Fprintln(os.Stderr, "\n 🦤 Verifying links...")
 		}
 	}
 }
@@ -146,9 +146,9 @@ func statusLinePrinter() (render engine.ProgressFunc, clear func()) {
 		var line string
 		switch p.Phase {
 		case engine.PhaseCrawl:
-			line = fmt.Sprintf("Crawling...  %d pages · %d links found", p.PagesCrawled, p.LinksFound)
+			line = fmt.Sprintf("🦤 Crawling...  %d pages · %d links found", p.PagesCrawled, p.LinksFound)
 		case engine.PhaseVerify:
-			line = fmt.Sprintf("Verifying...  %d/%d checked · %d alive · %d broken", p.LinksChecked, p.LinksTotal, p.Alive, p.Broken)
+			line = fmt.Sprintf("🦤 Verifying...  %d/%d checked · %d alive · %d broken", p.LinksChecked, p.LinksTotal, p.Alive, p.Broken)
 		default:
 			return
 		}
@@ -184,11 +184,11 @@ func linkPrinter(errorsOnly bool) engine.LinkCheckedFunc {
 func linkMark(c classify.Class) string {
 	switch c {
 	case classify.ClassAlive:
-		return "✓"
+		return "✅"
 	case classify.ClassBlocked, classify.ClassUnknown:
-		return "⚠"
+		return "⚠️"
 	default:
-		return "✗"
+		return "❌"
 	}
 }
 
@@ -204,7 +204,7 @@ var classLabels = []struct {
 
 func printReport(rep *engine.Report) {
 	dur := rep.FinishedAt.Sub(rep.StartedAt).Round(time.Millisecond)
-	fmt.Printf("\nScanned %s in %v\n", rep.Seed, dur)
+	fmt.Printf("\n🦤  Scanned %s in %v\n", rep.Seed, dur)
 	fmt.Printf("Pages crawled: %d · unique links: %d", rep.PagesCrawled, rep.TotalLinks)
 	if rep.Cached > 0 {
 		fmt.Printf(" (%d from cache)", rep.Cached)
@@ -255,7 +255,7 @@ func printReport(rep *engine.Report) {
 			fmt.Println("\nMISSING ANCHORS (page is alive, #fragment target missing):")
 		}
 		fragIssues++
-		line := fmt.Sprintf("  ⚠ %s — missing: #%s", hyperlink(r.URL), strings.Join(r.MissingFragments, ", #"))
+		line := fmt.Sprintf("  ⚠️ %s — missing: #%s", hyperlink(r.URL), strings.Join(r.MissingFragments, ", #"))
 		if refs := refsSummary(r.Refs, seedHost); refs != "" {
 			line += "  (" + refs + ")"
 		}
@@ -290,8 +290,8 @@ func printSummary(rep *engine.Report) {
 		}
 	}
 	fmt.Printf("%s %d alive · %s %d broken",
-		colorize(colorGreen, "✓"), rep.Counts[classify.ClassAlive],
-		colorize(colorRed, "✗"), hardBrokenCount(rep))
+		colorize(colorGreen, "✅"), rep.Counts[classify.ClassAlive],
+		colorize(colorRed, "❌"), hardBrokenCount(rep))
 	if erroring > 0 {
 		fmt.Printf(" · %d erroring", erroring)
 	}
@@ -364,13 +364,13 @@ func printChanges(rep *engine.Report) {
 	if len(newBroken) > 0 {
 		fmt.Printf("  %s (%d):\n", colorize(colorRed, "newly broken"), len(newBroken))
 		for _, r := range newBroken {
-			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "✗"), hyperlink(r.URL), classLabel(r.PrevClass))
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorRed, "❌"), hyperlink(r.URL), classLabel(r.PrevClass))
 		}
 	}
 	if len(fixed) > 0 {
 		fmt.Printf("  %s (%d):\n", colorize(colorGreen, "fixed"), len(fixed))
 		for _, r := range fixed {
-			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✓"), hyperlink(r.URL), classLabel(r.PrevClass))
+			fmt.Printf("    %s %s (was %s)\n", colorize(colorGreen, "✅"), hyperlink(r.URL), classLabel(r.PrevClass))
 		}
 	}
 }

@@ -25,7 +25,7 @@ func Execute() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `dodo — a fast, low-false-positive dead link checker
+	fmt.Fprintln(os.Stderr, `🦤  dodo - a fast, low-false-positive dead link checker
 
 Usage:
   dodo check <url> [flags]   scan a site and report broken links
