@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/url"
+	"regexp"
 	"sort"
 	"time"
 
@@ -13,6 +14,9 @@ import (
 	"github.com/esosaoh/dodo/internal/scheduler"
 )
 
+// Match source line range anchors
+var lineRangeFragmentRe = regexp.MustCompile(`^L?\d+(-L?\d+)?$`)
+
 type verifyItem struct {
 	l     *link
 	state *cache.LinkState
@@ -21,9 +25,6 @@ type verifyItem struct {
 	title string
 }
 
-// attachState consults the cache for one link: recently-verified healthy links
-// short-circuit (checkOne skips the fetch), the rest carry prior state for
-// conditional requests.
 func (e *Engine) attachState(ctx context.Context, it *verifyItem, needsFragBody bool) {
 	if e.Cache == nil {
 		return
@@ -45,8 +46,6 @@ func (e *Engine) attachState(ctx context.Context, it *verifyItem, needsFragBody 
 	}
 }
 
-// prevClassOf is attachState's read-only counterpart for crawled pages, which
-// always re-fetch and so never short-circuit.
 func (e *Engine) prevClassOf(ctx context.Context, url string) classify.Class {
 	if e.Cache == nil {
 		return ""
@@ -157,7 +156,6 @@ func (e *Engine) retractSuspectSoft404s(items []*verifyItem) {
 	}
 }
 
-// checkOne runs one fetch+classify attempt, reporting whether to retry.
 func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 	if it.res.cached {
 		return false
@@ -228,8 +226,6 @@ func (e *Engine) checkOne(ctx context.Context, it *verifyItem) bool {
 	}
 	it.res.verdict = v
 	limit := e.cfg.MaxRetries
-	// the expensive failures: timeouts burn wall time, 429 hosts make us wait
-	// out their pause — one retry each, then report honestly
 	if v.Reason == "timeout" || v.Reason == "rate_limited" {
 		limit = min(limit, 1)
 	}
@@ -256,6 +252,9 @@ func (e *Engine) finalize(l *link, res *checked, ids map[string]struct{}) LinkRe
 		var missing []string
 		for _, frag := range l.fragments() {
 			if frag == "top" { // browsers scroll to top for #top with no element
+				continue
+			}
+			if lineRangeFragmentRe.MatchString(frag) {
 				continue
 			}
 			if _, ok := ids[frag]; !ok {

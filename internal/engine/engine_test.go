@@ -165,7 +165,6 @@ func TestScanEndToEnd(t *testing.T) {
 	if rep.Broken < 3 {
 		t.Errorf("broken = %d, want at least 3 (missing, gone, soft-thing)", rep.Broken)
 	}
-	// Results must be sorted problems-first.
 	if len(rep.Results) > 0 && rep.Results[0].Class == classify.ClassAlive && rep.Broken > 0 {
 		t.Error("results are not sorted with problems first")
 	}
@@ -200,7 +199,6 @@ func TestSoft404NotAssertedLiveBeforeRetraction(t *testing.T) {
 	}
 }
 
-// memCache is a trivial in-memory StateCache for testing incremental scans.
 type memCache struct {
 	states map[string]*cache.LinkState
 	puts   int
@@ -382,15 +380,10 @@ and specific subject matter, unrelated to anything else on this site.
 	}
 }
 
-// PrevClass must track title-based soft-404 correctly across scans too, not
-// just fingerprint-based ones - this is a different classification path
-// with its own reason string.
 func TestOscillatingTitleSoft404AcrossScans(t *testing.T) {
 	var state int32 // 0=alive, 1=soft404-by-title
 	ext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/thing" {
-			// probe/garbage target: distinct from both /thing variants below,
-			// so the fingerprint never matches - isolates the title heuristic
 			html(w, `<html><head><title>Unrelated Probe Shell</title></head><body>
 Completely unrelated boilerplate text used only for garbage probe responses.
 </body></html>`)
@@ -491,5 +484,37 @@ func TestTimeoutLinksRetryOnlyOnce(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&hits); got != 2 {
 		t.Errorf("slow endpoint hit %d times, want 2", got)
+	}
+}
+
+func TestMissingAnchorsSkipsLineRangeFragments(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", func(w http.ResponseWriter, r *http.Request) {
+		html(w, `<html><body>
+<a href="/a#real">good</a>
+<a href="/a#L16-L36">github line range</a>
+<a href="/a#1107-1109">rustdoc line range</a>
+<a href="/a#fake">real missing anchor</a>
+</body></html>`)
+	})
+	mux.HandleFunc("/a", func(w http.ResponseWriter, r *http.Request) {
+		html(w, `<html><body><h2 id="real">A real section</h2></body></html>`)
+	})
+	seed := httptest.NewServer(mux)
+	t.Cleanup(seed.Close)
+
+	rep, err := NewEngine(testConfig()).Run(context.Background(), seed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := findResult(t, rep, seed.URL+"/a")
+	if slices.Contains(r.MissingFragments, "L16-L36") {
+		t.Errorf("L16-L36 (github line-range) reported missing, want skipped: %v", r.MissingFragments)
+	}
+	if slices.Contains(r.MissingFragments, "1107-1109") {
+		t.Errorf("1107-1109 (rustdoc line-range) reported missing, want skipped: %v", r.MissingFragments)
+	}
+	if !slices.Contains(r.MissingFragments, "fake") {
+		t.Errorf("fake anchor should still be reported missing, got: %v", r.MissingFragments)
 	}
 }
